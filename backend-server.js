@@ -632,6 +632,96 @@ app.post('/api/precedentes/buscar', async (req, res) => {
   }
 });
 
+/**
+ * GET /api/documento-pdf/:numero_processo/:documento_id
+ * Proxy autenticado: busca URL via MCP e retorna o PDF ao browser
+ */
+app.get('/api/documento-pdf/:numero_processo/:documento_id', async (req, res) => {
+  try {
+    const { numero_processo, documento_id } = req.params;
+
+    // 1. Obtém URL do documento via MCP
+    let pdfUrl = null;
+    try {
+      const result = await callMCPTool('pdpj_get_documento_url', {
+        numero_processo,
+        documento_id,
+      });
+      const text = extractMCPText(result);
+      if (text) {
+        const urlMatch = text.match(/https?:\/\/\S+/);
+        pdfUrl = urlMatch ? urlMatch[0] : null;
+      }
+    } catch (err) {
+      console.error('❌ Erro ao obter URL do documento:', err.message);
+    }
+
+    if (!pdfUrl) {
+      return res.status(404).json({ error: 'URL do documento não encontrada' });
+    }
+
+    // 2. Faz fetch do PDF com token — sem seguir redirects
+    console.log(`📄 Baixando PDF: ${pdfUrl}`);
+    const pdfResponse = await fetch(pdfUrl, {
+      redirect: 'manual',
+      headers: {
+        'Authorization': `Bearer ${AUTH_TOKEN}`,
+        'Accept': 'application/pdf,*/*',
+      },
+    });
+
+    // Detecta redirect para página de login
+    if (pdfResponse.status === 301 || pdfResponse.status === 302 || pdfResponse.status === 303) {
+      const location = pdfResponse.headers.get('location') || '';
+      console.warn(`⚠️ Redirect detectado → ${location} (PDF requer sessão ativa no TecJustica)`);
+      return res.status(401).json({
+        error: 'PDF requer autenticação no TecJustica',
+        mensagem: 'O servidor de documentos exige login ativo. Use o texto extraído disponível no visualizador.',
+        url_original: pdfUrl,
+      });
+    }
+
+    if (!pdfResponse.ok) {
+      console.error(`❌ Erro ao baixar PDF: ${pdfResponse.status} ${pdfResponse.statusText}`);
+      return res.status(pdfResponse.status).json({ error: 'Erro ao baixar documento PDF' });
+    }
+
+    // 3. Verifica se realmente é PDF (não HTML de login)
+    const contentType = pdfResponse.headers.get('content-type') || '';
+    if (contentType.includes('text/html')) {
+      console.warn('⚠️ Servidor retornou HTML em vez de PDF — sessão expirada ou não autorizado');
+      return res.status(401).json({
+        error: 'PDF não disponível',
+        mensagem: 'O servidor retornou uma página de autenticação. Use o texto extraído no visualizador.',
+      });
+    }
+
+    // 4. Repassa headers e stream do PDF ao browser
+    const contentLength = pdfResponse.headers.get('content-length');
+    const contentDisposition = pdfResponse.headers.get('content-disposition');
+
+    res.setHeader('Content-Type', contentType || 'application/pdf');
+    res.setHeader('Content-Disposition', contentDisposition || `inline; filename="${documento_id}.pdf"`);
+    if (contentLength) res.setHeader('Content-Length', contentLength);
+
+    // Stream do PDF diretamente ao cliente
+    const reader = pdfResponse.body.getReader();
+    const pump = async () => {
+      const { done, value } = await reader.read();
+      if (done) { res.end(); return; }
+      res.write(Buffer.from(value));
+      await pump();
+    };
+    await pump();
+
+  } catch (error) {
+    console.error('Erro no proxy PDF:', error);
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Erro interno ao processar PDF' });
+    }
+  }
+});
+
 // Error handler
 app.use((err, req, res, next) => {
   console.error('Erro não tratado:', err);
