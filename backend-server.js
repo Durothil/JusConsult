@@ -8,6 +8,7 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import rateLimit from 'express-rate-limit';
+import { createClient } from '@supabase/supabase-js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
@@ -73,6 +74,54 @@ if (!AUTH_TOKEN) {
   console.error('❌ TECJUSTICA_AUTH_TOKEN não configurado. Defina a variável de ambiente antes de iniciar.');
   process.exit(1);
 }
+
+// ─── Supabase — auditoria ─────────────────────────────────────────────────────
+
+const SUPABASE_URL = process.env.VITE_SUPABASE_URL;
+const SUPABASE_KEY = process.env.VITE_SUPABASE_KEY;
+
+const supabase = SUPABASE_URL && SUPABASE_KEY
+  ? createClient(SUPABASE_URL, SUPABASE_KEY)
+  : null;
+
+if (!supabase) {
+  console.warn('⚠️  Supabase não configurado — auditoria desativada (defina VITE_SUPABASE_URL e VITE_SUPABASE_KEY)');
+} else {
+  console.log('📋 Supabase conectado — auditoria ativa');
+}
+
+/**
+ * Registra um acesso no audit_log de forma assíncrona (fire-and-forget).
+ * Nunca bloqueia a resposta — falhas são apenas logadas.
+ *
+ * @param {import('express').Request} req  - request Express (para IP e user-agent)
+ * @param {string} acao        - Ex: 'SEARCH_CNJ', 'SEARCH_CPF', 'VIEW_DOCUMENT'
+ * @param {string} tipoDado    - Ex: 'process', 'document', 'precedent'
+ * @param {string} referenciaId - CNJ, CPF, doc_id, termo de busca
+ */
+function audit(req, acao, tipoDado, referenciaId) {
+  if (!supabase) return;
+
+  const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim()
+           || req.socket?.remoteAddress
+           || req.ip
+           || 'unknown';
+
+  const userAgent = (req.headers['user-agent'] || '').substring(0, 200);
+
+  // Fire-and-forget: não bloqueia a resposta
+  supabase.from('audit_logs').insert({
+    acao,
+    tipo_dado: tipoDado,
+    referencia_id: String(referenciaId).substring(0, 200),
+    user_ip: ip,
+    user_agent: userAgent,
+  }).then(({ error }) => {
+    if (error) console.warn(`[audit] Falha ao registrar ${acao}:`, error.message);
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 // Cliente MCP global
 let mcpClient = null;
@@ -663,7 +712,9 @@ app.post('/api/process/visao-geral', mcpLimiter, async (req, res) => {
       if (!text || isError || isMCPError(text)) {
         return res.status(404).json({ error: text || 'Processo não encontrado' });
       }
-      res.json(parseVisaoGeral(text, numero_processo));
+      const parsed = parseVisaoGeral(text, numero_processo);
+      audit(req, 'SEARCH_CNJ', 'process', numero_processo);
+      res.json(parsed);
     } catch (mcpError) {
       console.error('❌ MCP Error:', mcpError.message);
       res.status(503).json({ error: 'Serviço MCP temporariamente indisponível' });
@@ -718,7 +769,9 @@ app.post('/api/process/partes', mcpLimiter, async (req, res) => {
     try {
       const result = await callMCPTool('pdpj_list_partes', { numero_processo: cnj.value });
       const { text, isError } = parseMCPResponse(result, 'pdpj_list_partes');
-      res.json(text && !isError ? parsePartes(text) : { POLO_ATIVO: [], POLO_PASSIVO: [] });
+      const partesResult = text && !isError ? parsePartes(text) : { POLO_ATIVO: [], POLO_PASSIVO: [] };
+      if (text && !isError) audit(req, 'VIEW_PARTES', 'process', cnj.value);
+      res.json(partesResult);
     } catch (mcpError) {
       console.error('❌ MCP Error:', mcpError.message);
       res.json({ POLO_ATIVO: [], POLO_PASSIVO: [] });
@@ -743,7 +796,9 @@ app.post('/api/process/movimentos', mcpLimiter, async (req, res) => {
     try {
       const result = await callMCPTool('pdpj_list_movimentos', { numero_processo: cnjM.value, limit, offset });
       const { text, isError } = parseMCPResponse(result, 'pdpj_list_movimentos');
-      res.json(text && !isError ? parseMovimentos(text) : []);
+      const movs = text && !isError ? parseMovimentos(text) : [];
+      if (text && !isError) audit(req, 'VIEW_MOVIMENTOS', 'process', cnjM.value);
+      res.json(movs);
     } catch (mcpError) {
       console.error('❌ MCP Error:', mcpError.message);
       res.json([]);
@@ -768,7 +823,9 @@ app.post('/api/process/documentos', mcpLimiter, async (req, res) => {
     try {
       const result = await callMCPTool('pdpj_list_documentos', { numero_processo: cnjD.value, limit, offset });
       const { text, isError } = parseMCPResponse(result, 'pdpj_list_documentos');
-      res.json(text && !isError ? parseDocumentos(text) : []);
+      const docsList = text && !isError ? parseDocumentos(text) : [];
+      if (text && !isError) audit(req, 'VIEW_DOCUMENTOS', 'process', cnjD.value);
+      res.json(docsList);
     } catch (mcpError) {
       console.error('❌ MCP Error:', mcpError.message);
       res.json([]);
@@ -802,6 +859,7 @@ app.post('/api/process/documento/conteudo', mcpLimiter, async (req, res) => {
       if (!text || isError || isMCPError(text)) {
         return res.status(404).json({ error: text || 'Documento não encontrado ou sem conteúdo' });
       }
+      audit(req, 'READ_DOCUMENTO', 'document', documento_id);
       res.json({ conteudo: text, metadata: { titulo: '', tipo: '', dataCriacao: '', paginas: null } });
     } catch (mcpError) {
       console.error('❌ MCP Error:', mcpError.message);
@@ -868,7 +926,9 @@ app.post('/api/precedentes/buscar', mcpLimiter, async (req, res) => {
         tipos: tipos || null,
       });
       const { text, isError } = parseMCPResponse(result, 'pdpj_buscar_precedentes');
-      res.json(text && !isError ? parsePrecedentes(text, buscaVal.value) : { busca: buscaVal.value, total: 0, resultados: [] });
+      const precResult = text && !isError ? parsePrecedentes(text, buscaVal.value) : { busca: buscaVal.value, total: 0, resultados: [] };
+      if (text && !isError) audit(req, 'SEARCH_PRECEDENTES', 'precedent', buscaVal.value);
+      res.json(precResult);
     } catch (mcpError) {
       console.error('❌ MCP Error:', mcpError.message);
       res.json({ busca, total: 0, resultados: [] });
