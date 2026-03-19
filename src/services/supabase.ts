@@ -37,7 +37,7 @@ export async function saveProcess(data: any): Promise<void> {
           valor: data.valor,
           data_abertura: data.dataAbertura,
           juiz: data.juiz,
-          json_resumo: data.resumo ? (typeof data.resumo === 'string' ? JSON.parse(data.resumo) : data.resumo) : null,
+          json_resumo: data.resumo ? (typeof data.resumo === 'string' ? { texto: data.resumo } : data.resumo) : null,
         },
         { onConflict: 'cnj' }
       )
