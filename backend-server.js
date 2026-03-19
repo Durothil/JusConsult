@@ -7,6 +7,7 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import rateLimit from 'express-rate-limit';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
@@ -15,12 +16,54 @@ dotenv.config();
 const app = express();
 const PORT = process.env.BACKEND_PORT || 3001;
 
+// ─── Rate Limiting ────────────────────────────────────────────────────────────
+
+/**
+ * Nível 1 — Geral: todas as rotas /api/*
+ * 120 req / minuto por IP (2 req/s) — uso normal de uma aplicação
+ */
+const generalLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Muitas requisições. Aguarde um momento e tente novamente.' },
+  skip: (req) => req.path === '/api/health',
+});
+
+/**
+ * Nível 2 — MCP intensivo: buscas e leitura de documentos
+ * 20 req / minuto por IP — cada chamada consome crédito no MCP externo
+ */
+const mcpLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Limite de consultas atingido (20/min). Aguarde antes de realizar nova busca.' },
+});
+
+/**
+ * Nível 3 — PDF proxy: evita download abusivo
+ * 10 req / minuto por IP
+ */
+const pdfLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Limite de downloads atingido (10/min). Aguarde antes de abrir mais documentos.' },
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 // Middleware
 app.use(cors({
   origin: process.env.ALLOWED_ORIGIN || 'http://localhost:5173',
   methods: ['GET', 'POST'],
 }));
 app.use(express.json());
+app.use('/api', generalLimiter);
 
 // Configuração MCP
 const MCP_SERVER_URL = process.env.PROXY_TARGET_URL || 'https://tecjusticamcp-lite-production.up.railway.app/mcp';
@@ -587,7 +630,7 @@ app.get('/api/health', (req, res) => {
  * POST /api/process/visao-geral - Buscar visão geral de processo
  * Body: { numero_processo: string }
  */
-app.post('/api/process/visao-geral', async (req, res) => {
+app.post('/api/process/visao-geral', mcpLimiter, async (req, res) => {
   try {
     const { numero_processo } = req.body;
 
@@ -635,7 +678,7 @@ app.post('/api/process/visao-geral', async (req, res) => {
  * POST /api/process/search - Buscar processos por CPF/CNPJ
  * Body: { cpf_cnpj: string, tribunal?: string, situacao?: string }
  */
-app.post('/api/process/search', async (req, res) => {
+app.post('/api/process/search', mcpLimiter, async (req, res) => {
   try {
     const { cpf_cnpj, tribunal, situacao } = req.body;
 
@@ -665,7 +708,7 @@ app.post('/api/process/search', async (req, res) => {
  * POST /api/process/partes - Listar partes de um processo
  * Body: { numero_processo: string }
  */
-app.post('/api/process/partes', async (req, res) => {
+app.post('/api/process/partes', mcpLimiter, async (req, res) => {
   try {
     const { numero_processo } = req.body;
 
@@ -690,7 +733,7 @@ app.post('/api/process/partes', async (req, res) => {
  * POST /api/process/movimentos - Listar movimentos de um processo
  * Body: { numero_processo: string, limit?: number, offset?: number }
  */
-app.post('/api/process/movimentos', async (req, res) => {
+app.post('/api/process/movimentos', mcpLimiter, async (req, res) => {
   try {
     const { numero_processo, limit = 20, offset = 0 } = req.body;
 
@@ -715,7 +758,7 @@ app.post('/api/process/movimentos', async (req, res) => {
  * POST /api/process/documentos - Listar documentos de um processo
  * Body: { numero_processo: string, limit?: number, offset?: number }
  */
-app.post('/api/process/documentos', async (req, res) => {
+app.post('/api/process/documentos', mcpLimiter, async (req, res) => {
   try {
     const { numero_processo, limit = 20, offset = 0 } = req.body;
 
@@ -740,7 +783,7 @@ app.post('/api/process/documentos', async (req, res) => {
  * POST /api/process/documento/conteudo - Ler conteúdo de um documento
  * Body: { numero_processo: string, documento_id: string }
  */
-app.post('/api/process/documento/conteudo', async (req, res) => {
+app.post('/api/process/documento/conteudo', mcpLimiter, async (req, res) => {
   try {
     const { numero_processo, documento_id } = req.body;
 
@@ -774,7 +817,7 @@ app.post('/api/process/documento/conteudo', async (req, res) => {
  * POST /api/process/documento/url - Obter URL do documento
  * Body: { numero_processo: string, documento_id: string }
  */
-app.post('/api/process/documento/url', async (req, res) => {
+app.post('/api/process/documento/url', mcpLimiter, async (req, res) => {
   try {
     const { numero_processo, documento_id } = req.body;
 
@@ -811,7 +854,7 @@ app.post('/api/process/documento/url', async (req, res) => {
  * POST /api/precedentes/buscar - Buscar precedentes
  * Body: { busca: string, orgaos?: string[], tipos?: string[] }
  */
-app.post('/api/precedentes/buscar', async (req, res) => {
+app.post('/api/precedentes/buscar', mcpLimiter, async (req, res) => {
   try {
     const { busca, orgaos, tipos } = req.body;
 
@@ -840,7 +883,7 @@ app.post('/api/precedentes/buscar', async (req, res) => {
  * GET /api/documento-pdf/:numero_processo/:documento_id
  * Proxy autenticado: busca URL via MCP e retorna o PDF ao browser
  */
-app.get('/api/documento-pdf/:numero_processo/:documento_id', async (req, res) => {
+app.get('/api/documento-pdf/:numero_processo/:documento_id', pdfLimiter, async (req, res) => {
   try {
     const { numero_processo, documento_id } = req.params;
 
