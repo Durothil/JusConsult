@@ -3,7 +3,7 @@
  */
 
 import { getCacheKey, getCache, setCache, getTTLForType } from './cache'
-import { updateCacheMetadata, logAccess } from './supabase'
+import { updateCacheMetadata, logAccess, saveProcess, saveParties, saveMovements } from './supabase'
 import { Process, Party, ProcessMovement } from '@/types/process'
 import * as mcpService from './mcp.service'
 
@@ -49,6 +49,7 @@ export async function getProcessByCNJ(cnj: string): Promise<Process | null> {
     const ttl = getTTLForType(CACHE_TYPE)
     setCache(cacheKey, data, ttl)
     await updateCacheMetadata(CACHE_TYPE, cnj, ttl)
+    await saveProcess(data)
 
     logAccess('FETCH_MCP', 'process', cnj)
     return data
@@ -62,16 +63,17 @@ export async function getProcessByCNJ(cnj: string): Promise<Process | null> {
  * Busca processos por CPF/CNPJ
  * Não usa cache (busca varável)
  */
-export async function searchByCPFCNPJ(cpfCnpj: string, filtros?: any) {
+export async function searchByCPFCNPJ(cpfCnpj: string, tribunal?: string) {
   try {
-    const response = await apiClient.get('/process/search', {
-      params: {
-        cpf_cnpj: cpfCnpj,
-        ...filtros,
-      },
-    })
+    const mcpData = await mcpService.searchProcessesMCP(cpfCnpj, tribunal)
+
+    if (!mcpData) {
+      console.warn(`Nenhum processo encontrado para ${cpfCnpj}`)
+      return null
+    }
+
     logAccess('SEARCH', 'process', cpfCnpj)
-    return response.data
+    return mcpData
   } catch (error) {
     console.error(`Erro ao buscar por CPF/CNPJ ${cpfCnpj}:`, error)
     return null
@@ -117,6 +119,7 @@ export async function getProcessParties(cnj: string): Promise<Party[]> {
     const ttl = getTTLForType('process_parties')
     setCache(cacheKey, data, ttl)
     await updateCacheMetadata('process_parties', cnj, ttl)
+    await saveParties(cnj, data)
 
     return data
   } catch (error) {
@@ -147,16 +150,17 @@ export async function getProcessMovements(cnj: string): Promise<ProcessMovement[
 
     // Converte resposta MCP para formato ProcessMovement
     const data: ProcessMovement[] = (Array.isArray(mcpData) ? mcpData : mcpData.movements || []).map((m: any) => ({
-      id: m.id || `${m.data}-${Math.random()}`,
+      id: m.id || `${m.data || m.timestamp}-${m.tipo || m.type || ''}-${(m.descricao || m.description || '').slice(0, 10)}`.replace(/\s/g, '-'),
       data: new Date(m.data || m.timestamp || Date.now()),
       tipo: m.tipo || m.type || '',
       descricao: m.descricao || m.description || '',
-      orgao: m.orgao || m.orgao || '',
+      orgao: m.orgao || m.org || '',
     }))
 
     const ttl = getTTLForType('process_movements')
     setCache(cacheKey, data, ttl)
     await updateCacheMetadata('process_movements', cnj, ttl)
+    await saveMovements(cnj, data)
 
     return data
   } catch (error) {

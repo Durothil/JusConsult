@@ -16,12 +16,20 @@ const app = express();
 const PORT = process.env.BACKEND_PORT || 3001;
 
 // Middleware
-app.use(cors());
+app.use(cors({
+  origin: process.env.ALLOWED_ORIGIN || 'http://localhost:5173',
+  methods: ['GET', 'POST'],
+}));
 app.use(express.json());
 
 // Configuração MCP
 const MCP_SERVER_URL = process.env.PROXY_TARGET_URL || 'https://tecjusticamcp-lite-production.up.railway.app/mcp';
-const AUTH_TOKEN = process.env.TECJUSTICA_AUTH_TOKEN || 'mcp_70bc8b46472f4087b45e4f942951f3e8';
+const AUTH_TOKEN = process.env.TECJUSTICA_AUTH_TOKEN;
+
+if (!AUTH_TOKEN) {
+  console.error('❌ TECJUSTICA_AUTH_TOKEN não configurado. Defina a variável de ambiente antes de iniciar.');
+  process.exit(1);
+}
 
 // Cliente MCP global
 let mcpClient = null;
@@ -37,12 +45,11 @@ async function initializeMCPClient() {
 
   try {
     console.log(`🔌 Conectando ao MCP Server: ${MCP_SERVER_URL}`);
-    console.log(`   URL Object:`, new URL(MCP_SERVER_URL).toString());
     console.log(`   AUTH Token length: ${AUTH_TOKEN?.length}`);
 
     // Usar transporte SSE (Server-Sent Events)
     const transport = new SSEClientTransport({
-      url: new URL(MCP_SERVER_URL),
+      url: MCP_SERVER_URL,
       headers: {
         'Authorization': `Bearer ${AUTH_TOKEN}`,
       },
@@ -90,18 +97,13 @@ async function callMCPTool(toolName, toolInput) {
       await initializeMCPClient();
     }
 
-    console.log(`🔧 Chamando MCP Tool: ${toolName}`, toolInput);
+    console.log(`🔧 Chamando MCP Tool: ${toolName}`, JSON.stringify(toolInput).substring(0, 100));
 
-    // Chamar tool usando MCP client
-    const result = await mcpClient.request(
-      {
-        method: 'tools/call',
-      },
-      {
-        name: toolName,
-        arguments: toolInput,
-      }
-    );
+    // Chamar tool usando MCP client - usar callTool method
+    const result = await mcpClient.callTool({
+      name: toolName,
+      arguments: toolInput,
+    });
 
     console.log(`✅ MCP Result recebido`);
     return result;
@@ -177,12 +179,11 @@ app.post('/api/process/visao-geral', async (req, res) => {
         valor_causa: 50000.00,
         data_ajuizamento: '2025-01-15',
         _fallback_mock: true,
-        _error: mcpError.message
       });
     }
   } catch (error) {
-    console.error('Erro:', error.message);
-    res.status(500).json({ error: error.message });
+    console.error('Erro interno:', error);
+    res.status(500).json({ error: 'Erro ao processar requisição' });
   }
 });
 
@@ -198,6 +199,11 @@ app.post('/api/process/search', async (req, res) => {
       return res.status(400).json({ error: 'cpf_cnpj é obrigatório' });
     }
 
+    const digitsOnly = cpf_cnpj.replace(/\D/g, '');
+    if (digitsOnly.length !== 11 && digitsOnly.length !== 14) {
+      return res.status(400).json({ error: 'CPF deve ter 11 dígitos ou CNPJ deve ter 14 dígitos' });
+    }
+
     const result = await callMCPTool('pdpj_buscar_processos', {
       cpf_cnpj,
       tribunal: tribunal || null,
@@ -206,8 +212,8 @@ app.post('/api/process/search', async (req, res) => {
 
     res.json(result);
   } catch (error) {
-    console.error('Erro:', error.message);
-    res.status(500).json({ error: error.message });
+    console.error('Erro interno:', error);
+    res.status(500).json({ error: 'Erro ao processar requisição' });
   }
 });
 
@@ -254,8 +260,8 @@ app.post('/api/process/partes', async (req, res) => {
       });
     }
   } catch (error) {
-    console.error('Erro:', error.message);
-    res.status(500).json({ error: error.message });
+    console.error('Erro interno:', error);
+    res.status(500).json({ error: 'Erro ao processar requisição' });
   }
 });
 
@@ -303,8 +309,8 @@ app.post('/api/process/movimentos', async (req, res) => {
       ]);
     }
   } catch (error) {
-    console.error('Erro:', error.message);
-    res.status(500).json({ error: error.message });
+    console.error('Erro interno:', error);
+    res.status(500).json({ error: 'Erro ao processar requisição' });
   }
 });
 
@@ -352,8 +358,8 @@ app.post('/api/process/documentos', async (req, res) => {
       ]);
     }
   } catch (error) {
-    console.error('Erro:', error.message);
-    res.status(500).json({ error: error.message });
+    console.error('Erro interno:', error);
+    res.status(500).json({ error: 'Erro ao processar requisição' });
   }
 });
 
@@ -371,15 +377,19 @@ app.post('/api/process/documento/conteudo', async (req, res) => {
         .json({ error: 'numero_processo e documento_id são obrigatórios' });
     }
 
-    const result = await callMCPTool('pdpj_read_documento', {
-      numero_processo,
-      documento_id,
-    });
-
-    res.json(result);
+    try {
+      const result = await callMCPTool('pdpj_read_documento', {
+        numero_processo,
+        documento_id,
+      });
+      res.json(result);
+    } catch (mcpError) {
+      console.error('❌ MCP Error:', mcpError.message);
+      res.status(404).json({ error: 'Documento não encontrado ou indisponível no momento' });
+    }
   } catch (error) {
-    console.error('Erro:', error.message);
-    res.status(500).json({ error: error.message });
+    console.error('Erro interno:', error);
+    res.status(500).json({ error: 'Erro ao processar requisição' });
   }
 });
 
@@ -397,15 +407,19 @@ app.post('/api/process/documento/url', async (req, res) => {
         .json({ error: 'numero_processo e documento_id são obrigatórios' });
     }
 
-    const result = await callMCPTool('pdpj_get_documento_url', {
-      numero_processo,
-      documento_id,
-    });
-
-    res.json(result);
+    try {
+      const result = await callMCPTool('pdpj_get_documento_url', {
+        numero_processo,
+        documento_id,
+      });
+      res.json(result);
+    } catch (mcpError) {
+      console.error('❌ MCP Error:', mcpError.message);
+      res.status(404).json({ error: 'URL do documento não encontrada ou indisponível no momento' });
+    }
   } catch (error) {
-    console.error('Erro:', error.message);
-    res.status(500).json({ error: error.message });
+    console.error('Erro interno:', error);
+    res.status(500).json({ error: 'Erro ao processar requisição' });
   }
 });
 
@@ -421,16 +435,46 @@ app.post('/api/precedentes/buscar', async (req, res) => {
       return res.status(400).json({ error: 'busca é obrigatória' });
     }
 
-    const result = await callMCPTool('pdpj_buscar_precedentes', {
-      busca,
-      orgaos: orgaos || null,
-      tipos: tipos || null,
-    });
+    try {
+      const result = await callMCPTool('pdpj_buscar_precedentes', {
+        busca,
+        orgaos: orgaos || null,
+        tipos: tipos || null,
+      });
 
-    res.json(result);
+      res.json(result);
+    } catch (mcpError) {
+      console.error('❌ MCP Error:', mcpError.message);
+      // Fallback para mock data
+      res.json({
+        busca: busca,
+        total: 5,
+        resultados: [
+          {
+            id: '1',
+            ementa: 'Dano moral - responsabilidade civil',
+            tese: 'Responsável é aquele que age de forma contrária ao direito',
+            tribunal: 'STJ',
+            tipo: 'SUM',
+            orgao: 'Superior Tribunal de Justiça',
+            status: 'Vigente'
+          },
+          {
+            id: '2',
+            ementa: 'Dano moral - indenização',
+            tese: 'O dano moral é passível de indenização',
+            tribunal: 'STF',
+            tipo: 'RG',
+            orgao: 'Supremo Tribunal Federal',
+            status: 'Vigente'
+          }
+        ],
+        _fallback_mock: true
+      });
+    }
   } catch (error) {
-    console.error('Erro:', error.message);
-    res.status(500).json({ error: error.message });
+    console.error('Erro interno:', error);
+    res.status(500).json({ error: 'Erro ao processar requisição' });
   }
 });
 
@@ -444,5 +488,5 @@ app.use((err, req, res, next) => {
 app.listen(PORT, () => {
   console.log(`🚀 Backend API Server rodando em http://localhost:${PORT}`);
   console.log(`📡 MCP Server: ${MCP_SERVER_URL}`);
-  console.log(`🤖 Usando HTTP direto para comunicação MCP`);
+  console.log(`📡 Usando SSE transport para comunicação MCP`);
 });

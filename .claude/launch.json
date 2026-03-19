@@ -2,19 +2,18 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "proxy",
+      "name": "backend",
       "runtimeExecutable": "node",
-      "runtimeArgs": ["tecjustica-frontend/proxy-server.js"],
+      "runtimeArgs": ["backend-server.js"],
       "port": 3001,
       "autoPort": true
     },
     {
       "name": "dev",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
+      "runtimeExecutable": "C:\\Program Files\\nodejs\\node.exe",
+      "runtimeArgs": ["node_modules/vite/bin/vite.js", "--port", "5173", "--host"],
       "port": 5173,
-      "autoPort": false,
-      "cwd": "tecjustica-frontend"
+      "autoPort": false
     }
   ]
 }

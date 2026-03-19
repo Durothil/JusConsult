@@ -9,6 +9,7 @@ const BACKEND_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001'
 
 const backendClient = axios.create({
   baseURL: BACKEND_URL,
+  timeout: 30000,
   headers: {
     'Content-Type': 'application/json',
   },
@@ -28,7 +29,7 @@ async function callBackendAPI(endpoint: string, data: Record<string, any> = {}) 
       return null
     }
 
-    console.log(`✅ Resposta Backend:`, response.data)
+    if (import.meta.env.DEV) console.debug(`✅ Resposta Backend recebida de ${endpoint}`)
     return response.data
   } catch (error) {
     console.error(`❌ Erro ao chamar backend (${endpoint}):`, error)

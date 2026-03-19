@@ -1,11 +1,12 @@
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import Layout from './components/layout/Layout'
-import Home from './pages/Home'
-import ProcessDetail from './pages/ProcessDetail'
-import DocumentViewer from './pages/DocumentViewer'
-import PrecedentsPage from './pages/PrecedentsPage'
-import NotFound from './pages/NotFound'
+import Layout from '@/components/layout/Layout'
+import Home from '@/pages/Home'
+import ProcessDetail from '@/pages/ProcessDetail'
+import DocumentViewer from '@/pages/DocumentViewer'
+import PrecedentsPage from '@/pages/PrecedentsPage'
+import SearchCPF from '@/pages/SearchCPF'
+import NotFound from '@/pages/NotFound'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -25,6 +26,7 @@ function App() {
             <Route path="/process/:cnj" element={<ProcessDetail />} />
             <Route path="/document/:documentId" element={<DocumentViewer />} />
             <Route path="/precedents" element={<PrecedentsPage />} />
+            <Route path="/search-cpf" element={<SearchCPF />} />
             <Route path="*" element={<NotFound />} />
           </Route>
         </Routes>

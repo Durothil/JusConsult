@@ -2,12 +2,14 @@
  * Lógica de TTL e cache
  */
 
-const CACHE_TTL = {
-  PROCESS_OVERVIEW: 24 * 60 * 60, // 24 horas
-  PROCESS_MOVEMENTS: 6 * 60 * 60, // 6 horas
-  PROCESS_DOCUMENTS: 6 * 60 * 60, // 6 horas
-  PROCESS_PARTIES: 24 * 60 * 60, // 24 horas
-  PRECEDENTS: 7 * 24 * 60 * 60, // 7 dias
+const CACHE_TTL: Record<string, number> = {
+  process_overview: 24 * 60 * 60,   // 24 horas
+  process_movements: 6 * 60 * 60,   // 6 horas
+  process_documents: 6 * 60 * 60,   // 6 horas
+  process_parties: 24 * 60 * 60,    // 24 horas
+  precedents: 7 * 24 * 60 * 60,     // 7 dias
+  precedents_search: 7 * 24 * 60 * 60, // 7 dias
+  document_url: 6 * 60 * 60,        // 6 horas
 }
 
 interface CacheEntry {
@@ -79,5 +81,5 @@ export function clearAllCache(): void {
  * Retorna TTL apropriado por tipo
  */
 export function getTTLForType(tipo: string): number {
-  return CACHE_TTL[tipo as keyof typeof CACHE_TTL] || 3600
+  return CACHE_TTL[tipo] ?? 3600
 }

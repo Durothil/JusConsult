@@ -3,7 +3,7 @@
  */
 
 import { getCacheKey, getCache, setCache, getTTLForType } from './cache'
-import { updateCacheMetadata, logAccess } from './supabase'
+import { updateCacheMetadata, logAccess, savePrecedents } from './supabase'
 import { PrecedentSearchResult, Precedent } from '@/types/precedent'
 import * as mcpService from './mcp.service'
 
@@ -54,7 +54,7 @@ export async function searchPrecedents(
 
     // Converte resposta MCP para formato Precedent
     const resultados: Precedent[] = (Array.isArray(mcpData) ? mcpData : mcpData.nodes || mcpData.resultados || []).map((p: any) => ({
-      id: p.id || `${Date.now()}-${Math.random()}`,
+      id: p.id || `${p.tribunal || ''}-${p.tipo || ''}-${(p.ementa || '').slice(0, 20)}`.replace(/\s/g, '-'),
       ementa: p.ementa || p.title || p.summary || '',
       tese: p.tese || p.thesis || p.description || '',
       tribunal: p.tribunal || p.orgao || '',
@@ -73,6 +73,7 @@ export async function searchPrecedents(
     const ttl = getTTLForType('precedents')
     setCache(cacheKey, result, ttl)
     await updateCacheMetadata('precedents_search', queryHash, ttl)
+    await savePrecedents(termo, resultados)
 
     logAccess('SEARCH', 'precedent', termo)
     return result

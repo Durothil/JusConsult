@@ -4,17 +4,19 @@ import Card, { CardContent, CardHeader } from '@/components/common/Card'
 import Button from '@/components/common/Button'
 import { getProcessByCNJ } from '@/services/process.service'
 import { Spinner } from '@/components/common/Loading'
+import { ErrorAlert } from '@/components/common/ErrorAlert'
+
+const CNJ_REGEX = /^\d{7}-\d{2}\.\d{4}\.\d\.\d{2}\.\d{4}$/
+
+function validateCNJ(value: string): boolean {
+  return CNJ_REGEX.test(value)
+}
 
 const Home: React.FC = () => {
   const navigate = useNavigate()
   const [cnj, setCnj] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-
-  const validateCNJ = (value: string): boolean => {
-    const cnjRegex = /^\d{7}-\d{2}\.\d{4}\.\d\.\d{2}\.\d{4}$/
-    return cnjRegex.test(value)
-  }
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -73,7 +75,7 @@ const Home: React.FC = () => {
               </p>
             </div>
 
-            {error && <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-800 text-sm">{error}</div>}
+            <ErrorAlert message={error} />
 
             <div className="flex gap-3">
               <Button

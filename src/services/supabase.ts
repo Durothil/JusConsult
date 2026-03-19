@@ -19,16 +19,207 @@ const supabase: SupabaseClient | null = supabaseUrl && supabaseKey
 export { supabase }
 
 /**
- * Verifica e retorna dados em cache se válido
+ * Salva processo em cache
  */
-export async function getFromCache<T>(
-  tipo: string,
-  chaveId: string
-): Promise<T | null> {
-  if (!supabase) return null
+export async function saveProcess(data: any): Promise<void> {
+  if (!supabase) return
 
   try {
-    // Verifica metadados de cache
+    await supabase
+      .from('processes')
+      .upsert(
+        {
+          cnj: data.cnj,
+          tribunal: data.tribunal,
+          classe: data.classe,
+          assunto: data.assunto,
+          status: data.status,
+          valor: data.valor,
+          data_abertura: data.dataAbertura,
+          juiz: data.juiz,
+          json_resumo: data.resumo ? (typeof data.resumo === 'string' ? JSON.parse(data.resumo) : data.resumo) : null,
+        },
+        { onConflict: 'cnj' }
+      )
+  } catch (error) {
+    console.error('Error saving process:', error)
+  }
+}
+
+/**
+ * Salva partes em cache
+ */
+export async function saveParties(cnj: string, parties: any[]): Promise<void> {
+  if (!supabase) return
+
+  try {
+    // Busca ID do processo
+    const { data: process } = await supabase
+      .from('processes')
+      .select('id')
+      .eq('cnj', cnj)
+      .single()
+
+    if (!process) return
+
+    // Salva todas as partes em batch
+    const partiesPayload = parties.map((party) => ({
+      process_id: process.id,
+      tipo: party.tipo,
+      nome: party.nome,
+      cpf_cnpj: party.cpfCnpj,
+      cpf_cnpj_formatado: party.cpfCnpjFormatado || party.cpfCnpj,
+      email: party.email,
+      telefone: party.telefone,
+      endereco: party.endereco,
+      complemento_endereco: party.complementoEndereco,
+    }))
+
+    if (partiesPayload.length > 0) {
+      await supabase.from('process_parties').upsert(partiesPayload)
+    }
+
+    // Salva advogados de todas as partes em batch
+    const lawyersByPartyName = new Map<string, any[]>()
+    for (const party of parties) {
+      if (party.lawyers && party.lawyers.length > 0) {
+        lawyersByPartyName.set(party.nome, party.lawyers)
+      }
+    }
+
+    if (lawyersByPartyName.size > 0) {
+      const { data: savedParties } = await supabase
+        .from('process_parties')
+        .select('id, nome')
+        .eq('process_id', process.id)
+        .in('nome', Array.from(lawyersByPartyName.keys()))
+
+      if (savedParties && savedParties.length > 0) {
+        const lawyersPayload = savedParties.flatMap((savedParty) => {
+          const lawyers = lawyersByPartyName.get(savedParty.nome) || []
+          return lawyers.map((lawyer: any) => ({
+            party_id: savedParty.id,
+            nome: lawyer.nome,
+            oab: lawyer.oab,
+            email: lawyer.email,
+            telefone: lawyer.telefone,
+          }))
+        })
+
+        if (lawyersPayload.length > 0) {
+          await supabase.from('process_lawyers').upsert(lawyersPayload)
+        }
+      }
+    }
+  } catch (error) {
+    console.error('Error saving parties:', error)
+  }
+}
+
+/**
+ * Salva movimentos em cache
+ */
+export async function saveMovements(cnj: string, movements: any[]): Promise<void> {
+  if (!supabase) return
+
+  try {
+    const { data: process } = await supabase
+      .from('processes')
+      .select('id')
+      .eq('cnj', cnj)
+      .single()
+
+    if (!process) return
+
+    const movementsPayload = movements.map((movement) => ({
+      process_id: process.id,
+      data: movement.data,
+      descricao: movement.descricao,
+      tipo: movement.tipo,
+      orgao: movement.orgao,
+      hash_unico: `${cnj}-${movement.data}-${movement.tipo}`.replace(/[^a-zA-Z0-9-]/g, ''),
+    }))
+
+    if (movementsPayload.length > 0) {
+      await supabase
+        .from('process_movements')
+        .upsert(movementsPayload, { onConflict: 'hash_unico' })
+    }
+  } catch (error) {
+    console.error('Error saving movements:', error)
+  }
+}
+
+/**
+ * Salva documentos em cache
+ */
+export async function saveDocuments(cnj: string, documents: any[]): Promise<void> {
+  if (!supabase) return
+
+  try {
+    const { data: process } = await supabase
+      .from('processes')
+      .select('id')
+      .eq('cnj', cnj)
+      .single()
+
+    if (!process) return
+
+    const documentsPayload = documents.map((doc) => ({
+      process_id: process.id,
+      doc_id_externo: doc.id || doc.docId,
+      titulo: doc.titulo,
+      tipo: doc.tipo,
+      data_criacao: doc.dataCriacao,
+      paginas: doc.paginas,
+      url_pdf: doc.urlPdf,
+      texto_extraido: doc.textoExtraido,
+      tamanho_bytes: doc.tamanhoBytes,
+      hash_unico: `${cnj}-${doc.id || doc.docId}`,
+    }))
+
+    if (documentsPayload.length > 0) {
+      await supabase
+        .from('process_documents')
+        .upsert(documentsPayload, { onConflict: 'hash_unico' })
+    }
+  } catch (error) {
+    console.error('Error saving documents:', error)
+  }
+}
+
+/**
+ * Salva precedentes em cache
+ */
+export async function savePrecedents(termo: string, results: any[]): Promise<void> {
+  if (!supabase) return
+
+  try {
+    const queryHash = btoa(termo).replace(/[^a-zA-Z0-9-]/g, '')
+
+    await supabase
+      .from('precedents_cache')
+      .upsert({
+        termo_busca: termo,
+        query_hash: queryHash,
+        resultados_json: results,
+        total_results: results.length,
+      })
+  } catch (error) {
+    console.error('Error saving precedents:', error)
+  }
+}
+
+/**
+ * Verifica e retorna dados em cache se válido
+ */
+export async function getFromCacheMetadata(
+  tipo: string,
+  chaveId: string
+): Promise<boolean> {
+  if (!supabase) return false
+
+  try {
     const { data: cacheMeta } = await supabase
       .from('cache_metadata')
       .select('proxima_atualizacao_em')
@@ -36,20 +227,15 @@ export async function getFromCache<T>(
       .eq('chave_id', chaveId)
       .single()
 
-    if (!cacheMeta) return null
+    if (!cacheMeta) return false
 
     const agora = new Date()
     const proximaAtualizacao = new Date(cacheMeta.proxima_atualizacao_em)
 
-    if (agora < proximaAtualizacao) {
-      // Cache ainda é válido
-      return null // Será implementado com dados reais
-    }
-
-    return null
+    return agora < proximaAtualizacao
   } catch (error) {
     console.error('Cache check error:', error)
-    return null
+    return false
   }
 }
 

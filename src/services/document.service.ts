@@ -3,7 +3,7 @@
  */
 
 import { getCacheKey, getCache, setCache, getTTLForType } from './cache'
-import { updateCacheMetadata, logAccess } from './supabase'
+import { updateCacheMetadata, logAccess, saveDocuments } from './supabase'
 import { Document } from '@/types/document'
 import * as mcpService from './mcp.service'
 
@@ -28,18 +28,23 @@ export async function listDocuments(cnj: string): Promise<Document[]> {
     }
 
     // Converte resposta MCP para formato Document
+    const now = new Date().toISOString()
     const data: Document[] = (Array.isArray(mcpData) ? mcpData : mcpData.documents || []).map((d: any) => ({
       id: d.id || d.doc_id_externo || '',
+      processId: cnj,
       titulo: d.titulo || d.name || '',
       tipo: d.tipo || d.type || '',
-      dataCriacao: d.data_criacao ? new Date(d.data_criacao) : new Date(),
+      dataCriacao: d.data_criacao || '',
       paginas: d.paginas || d.pages || 0,
-      url: d.url || d.url_pdf || '',
+      urlPdf: d.url || d.url_pdf || '',
+      createdAt: now,
+      updatedAt: now,
     }))
 
     const ttl = getTTLForType('process_documents')
     setCache(cacheKey, data, ttl)
     await updateCacheMetadata('process_documents', cnj, ttl)
+    await saveDocuments(cnj, data)
 
     return data
   } catch (error) {
@@ -57,7 +62,6 @@ export async function readDocument(
   docId: string
 ): Promise<{ conteudo: string; metadata: any } | null> {
   try {
-    logAccess('READ', 'document', docId)
     const mcpData = await mcpService.readDocumentMCP(cnj, docId)
 
     if (!mcpData) {
@@ -65,6 +69,7 @@ export async function readDocument(
       return null
     }
 
+    logAccess('READ', 'document', docId)
     return {
       conteudo: mcpData.conteudo || mcpData.texto_extraido || '',
       metadata: mcpData.metadata || mcpData,

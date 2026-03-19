@@ -1,12 +1,13 @@
-import React, { useState, useEffect } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
-import Card, { CardContent, CardHeader } from '@/components/common/Card'
+import React, { useState, useEffect, useRef } from 'react'
+import { useParams, useNavigate, useLocation } from 'react-router-dom'
+import Card, { CardContent } from '@/components/common/Card'
 import Button from '@/components/common/Button'
 import Badge from '@/components/common/Badge'
 import { PageLoading } from '@/components/common/Loading'
 import Empty from '@/components/common/Empty'
-import { readDocument, getDocumentURL } from '@/services/document.service'
+import { CacheTimestamp } from '@/components/common/CacheTimestamp'
 import type { Document } from '@/types/document'
+import { readDocument, getDocumentURL } from '@/services/document.service'
 
 interface DocumentViewerState {
   document: Document | null
@@ -14,79 +15,71 @@ interface DocumentViewerState {
   loading: boolean
   error: string | null
   copied: boolean
+  lastUpdated: string | null
 }
 
 const DocumentViewer: React.FC = () => {
   const { documentId } = useParams<{ documentId: string }>()
   const navigate = useNavigate()
+  const location = useLocation()
+  const copyTimeoutRef = useRef<ReturnType<typeof setTimeout>>()
   const [state, setState] = useState<DocumentViewerState>({
     document: null,
     content: null,
     loading: true,
     error: null,
     copied: false,
+    lastUpdated: null,
   })
 
   useEffect(() => {
+    const locationState = location.state as { cnj?: string } | null
+    const cnj = locationState?.cnj
+
     const loadDocument = async () => {
-      if (!documentId) return
+      if (!documentId || !cnj) return
 
       try {
         setState((s) => ({ ...s, loading: true, error: null }))
 
-        // Em produção, buscar documento real
-        // const doc = await getDocument(documentId)
-        // const content = await readDocument(documentId)
+        // Busca conteúdo e URL em paralelo
+        const [docContent, docUrl] = await Promise.all([
+          readDocument(cnj, documentId),
+          getDocumentURL(cnj, documentId),
+        ])
 
-        // Mock data para desenvolvimento
-        const mockDoc: Document = {
-          id: documentId,
-          titulo: 'Sentença - Processo Condenatório',
-          tipo: 'Sentença',
-          dataCriacao: new Date('2024-06-15'),
-          paginas: 12,
-          url: '#',
+        if (!docContent) {
+          setState((s) => ({
+            ...s,
+            error: 'Documento não encontrado',
+            loading: false,
+          }))
+          return
         }
 
-        const mockContent = `PODER JUDICIÁRIO
-TRIBUNAL DE JUSTIÇA DO ESTADO DE SÃO PAULO
-COMARCA DE SÃO PAULO
+        // Create document object with fetched data
+        const lastUpdated = new Date().toISOString()
 
-Sentença
-
-Vistos, etc.
-
-${Array(8)
-  .fill(null)
-  .map(
-    (_, i) => `Considerando que o presente feito trata de ${
-      ['questão de direito civil', 'matéria contratual', 'obrigação de fazer', 'indenização por danos', 'responsabilidade extracontratual'][i % 5]
-    }, e que os autos se encontram em condições de serem julgados, passo a análise das questões controvertidas.
-
-Dos fatos, extrai-se que ${
-      ['a autora comprou bens do réu', 'houve inadimplemento contratual', 'ocorreu dano material', 'a conduta foi negligente', 'havia cláusula penal'
-      ][i % 5]
-    }. A prova documental e testemunhal deixa clara a ${['culpa do demandado', 'boa-fé da autora', 'ocorrência do fato lesivo', 'nexo causal', 'quantia devida'][i % 5]}.`
-  )
-  .join('\n\n')}
-
-Em face do exposto, JULGO procedente o pedido para condenar o réu ao pagamento de R$ 15.000,00 (quinze mil reais) a título de indenização pelos danos materiais, corrigidos monetariamente desde a data do fato e acrescidos de juros moratórios de 1% ao mês.
-
-Condeno o réu ao pagamento das custas processuais e honorários advocatícios, que arbitro em 10% do valor da condenação.
-
-Certifico que extraí cópia dessa sentença, a qual será enviada aos interessados via sistema eletrônico de processamento de autos.
-
-São Paulo, 15 de junho de 2024.
-
-Desembargador João Silva
-Matrícula: 12345`
+        // Build document from fetched data
+        const document: Document = {
+          id: documentId,
+          processId: cnj,
+          titulo: docContent.metadata?.titulo || 'Documento do Processo',
+          tipo: docContent.metadata?.tipo || 'Documento',
+          dataCriacao: docContent.metadata?.dataCriacao || lastUpdated.split('T')[0],
+          paginas: docContent.metadata?.paginas || 1,
+          urlPdf: docUrl || '#',
+          createdAt: lastUpdated,
+          updatedAt: lastUpdated,
+        }
 
         setState({
-          document: mockDoc,
-          content: mockContent,
+          document,
+          content: docContent.conteudo || '',
           loading: false,
           error: null,
           copied: false,
+          lastUpdated,
         })
       } catch (err) {
         setState((s) => ({
@@ -99,7 +92,8 @@ Matrícula: 12345`
     }
 
     loadDocument()
-  }, [documentId])
+    return () => clearTimeout(copyTimeoutRef.current)
+  }, [documentId, location.state])
 
   const handleCopyText = async () => {
     if (!state.content) return
@@ -107,7 +101,7 @@ Matrícula: 12345`
     try {
       await navigator.clipboard.writeText(state.content)
       setState((s) => ({ ...s, copied: true }))
-      setTimeout(() => {
+      copyTimeoutRef.current = setTimeout(() => {
         setState((s) => ({ ...s, copied: false }))
       }, 2000)
     } catch (err) {
@@ -116,9 +110,21 @@ Matrícula: 12345`
   }
 
   const handleOpenPDF = () => {
-    if (state.document?.url) {
-      window.open(state.document.url, '_blank')
+    if (state.document?.urlPdf) {
+      window.open(state.document.urlPdf, '_blank')
     }
+  }
+
+  const locationState = location.state as { cnj?: string } | null
+  if (!locationState?.cnj) {
+    return (
+      <div className="flex items-center justify-center py-16">
+        <Empty
+          title="Contexto de processo não encontrado"
+          description="Navegue a partir da página de detalhes do processo para visualizar este documento"
+        />
+      </div>
+    )
   }
 
   if (state.loading) return <PageLoading />
@@ -194,6 +200,39 @@ Matrícula: 12345`
           </div>
         </CardContent>
       </Card>
+
+      {/* Cache Status */}
+      {state.lastUpdated && (
+        <CacheTimestamp
+          timestamp={state.lastUpdated}
+          isLoading={false}
+          onRefresh={() => {
+            const cnj = (location.state as { cnj?: string } | null)?.cnj
+            if (cnj && documentId) {
+              setState((s) => ({ ...s, loading: true, error: null }))
+              Promise.all([readDocument(cnj, documentId), getDocumentURL(cnj, documentId)])
+                .then(([docContent, docUrl]) => {
+                  if (!docContent) {
+                    setState((s) => ({ ...s, error: 'Documento não encontrado', loading: false }))
+                    return
+                  }
+                  const lastUpdated = new Date().toISOString()
+                  setState((s) => ({
+                    ...s,
+                    content: docContent.conteudo || '',
+                    document: s.document
+                      ? { ...s.document, urlPdf: docUrl || '#', updatedAt: lastUpdated }
+                      : null,
+                    loading: false,
+                    lastUpdated,
+                  }))
+                })
+                .catch(() => setState((s) => ({ ...s, error: 'Erro ao recarregar', loading: false })))
+            }
+          }}
+          ttlMinutes={6 * 60}
+        />
+      )}
 
       {/* Document Content */}
       <Card>
