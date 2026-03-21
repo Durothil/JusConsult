@@ -3,7 +3,6 @@
  */
 
 import { getCacheKey, getCache, setCache, getTTLForType } from './cache'
-import { updateCacheMetadata, logAccess, savePrecedents } from './supabase'
 import { PrecedentSearchResult, Precedent } from '@/types/precedent'
 import * as mcpService from './mcp.service'
 
@@ -72,10 +71,6 @@ export async function searchPrecedents(
 
     const ttl = getTTLForType('precedents')
     setCache(cacheKey, result, ttl)
-    await updateCacheMetadata('precedents_search', queryHash, ttl)
-    await savePrecedents(termo, resultados)
-
-    logAccess('SEARCH', 'precedent', termo)
     return result
   } catch (error) {
     console.error(`Erro ao buscar precedentes para "${termo}":`, error)

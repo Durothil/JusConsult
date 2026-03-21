@@ -3,7 +3,6 @@
  */
 
 import { getCacheKey, getCache, setCache, getTTLForType } from './cache'
-import { updateCacheMetadata, logAccess, saveDocuments } from './supabase'
 import { Document } from '@/types/document'
 import * as mcpService from './mcp.service'
 
@@ -43,9 +42,6 @@ export async function listDocuments(cnj: string): Promise<Document[]> {
 
     const ttl = getTTLForType('process_documents')
     setCache(cacheKey, data, ttl)
-    await updateCacheMetadata('process_documents', cnj, ttl)
-    await saveDocuments(cnj, data)
-
     return data
   } catch (error) {
     console.error(`Erro ao listar documentos do processo ${cnj}:`, error)
@@ -69,7 +65,6 @@ export async function readDocument(
       return null
     }
 
-    logAccess('READ', 'document', docId)
     return {
       conteudo: mcpData.conteudo || mcpData.texto_extraido || '',
       metadata: mcpData.metadata || mcpData,

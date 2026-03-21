@@ -81,14 +81,14 @@ if (!AUTH_TOKEN) {
 // ─── Supabase — auditoria ─────────────────────────────────────────────────────
 
 const SUPABASE_URL = process.env.VITE_SUPABASE_URL;
-const SUPABASE_KEY = process.env.VITE_SUPABASE_KEY;
+const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY; // service_role — nunca expor no frontend
 
 const supabase = SUPABASE_URL && SUPABASE_KEY
   ? createClient(SUPABASE_URL, SUPABASE_KEY)
   : null;
 
 if (!supabase) {
-  console.warn('⚠️  Supabase não configurado — auditoria desativada (defina VITE_SUPABASE_URL e VITE_SUPABASE_KEY)');
+  console.warn('⚠️  Supabase não configurado — auditoria desativada (defina VITE_SUPABASE_URL e SUPABASE_SERVICE_KEY)');
 } else {
   console.log('📋 Supabase conectado — auditoria ativa');
 }

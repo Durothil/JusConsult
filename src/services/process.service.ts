@@ -3,7 +3,6 @@
  */
 
 import { getCacheKey, getCache, setCache, getTTLForType } from './cache'
-import { updateCacheMetadata, logAccess, saveProcess, saveParties, saveMovements } from './supabase'
 import { Process, Party, ProcessMovement } from '@/types/process'
 import * as mcpService from './mcp.service'
 
@@ -20,7 +19,6 @@ export async function getProcessByCNJ(cnj: string): Promise<Process | null> {
   const cached = getCache<Process>(cacheKey)
   if (cached) {
     console.log(`✓ Processo ${cnj} carregado do cache`)
-    logAccess('VIEW', 'process', cnj)
     return cached
   }
 
@@ -48,12 +46,6 @@ export async function getProcessByCNJ(cnj: string): Promise<Process | null> {
 
     const ttl = getTTLForType(CACHE_TYPE)
     setCache(cacheKey, data, ttl)
-
-    // Fire-and-forget: falha do Supabase não bloqueia retorno dos dados MCP
-    updateCacheMetadata(CACHE_TYPE, cnj, ttl).catch(e => console.warn(`[cache] updateCacheMetadata falhou para ${cnj}:`, e))
-    saveProcess(data).catch(e => console.warn(`[cache] saveProcess falhou para ${cnj}:`, e))
-
-    logAccess('FETCH_MCP', 'process', cnj)
     return data
   } catch (error) {
     console.error(`Erro ao buscar processo ${cnj} do MCP:`, error)
@@ -74,7 +66,6 @@ export async function searchByCPFCNPJ(cpfCnpj: string, tribunal?: string) {
       return null
     }
 
-    logAccess('SEARCH', 'process', cpfCnpj)
     return mcpData
   } catch (error) {
     console.error(`Erro ao buscar por CPF/CNPJ ${cpfCnpj}:`, error)
@@ -120,9 +111,6 @@ export async function getProcessParties(cnj: string): Promise<Party[]> {
 
     const ttl = getTTLForType('process_parties')
     setCache(cacheKey, data, ttl)
-    updateCacheMetadata('process_parties', cnj, ttl).catch(e => console.warn(`[cache] updateCacheMetadata parties falhou para ${cnj}:`, e))
-    saveParties(cnj, data).catch(e => console.warn(`[cache] saveParties falhou para ${cnj}:`, e))
-
     return data
   } catch (error) {
     console.error(`Erro ao buscar partes do processo ${cnj}:`, error)
@@ -161,9 +149,6 @@ export async function getProcessMovements(cnj: string): Promise<ProcessMovement[
 
     const ttl = getTTLForType('process_movements')
     setCache(cacheKey, data, ttl)
-    updateCacheMetadata('process_movements', cnj, ttl).catch(e => console.warn(`[cache] updateCacheMetadata movements falhou para ${cnj}:`, e))
-    saveMovements(cnj, data).catch(e => console.warn(`[cache] saveMovements falhou para ${cnj}:`, e))
-
     return data
   } catch (error) {
     console.error(`Erro ao buscar movimentos do processo ${cnj}:`, error)
