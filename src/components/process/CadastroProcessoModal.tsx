@@ -69,8 +69,9 @@ export function CadastroProcessoModal({ isOpen, onClose, onSuccess, cnjInicial, 
       }
       onSuccess()
       onClose()
-    } catch (err: any) {
-      const msg = err?.response?.data?.error || 'Erro ao salvar processo.'
+    } catch (err: unknown) {
+      const axiosErr = err as { response?: { data?: { error?: string } } }
+      const msg = axiosErr?.response?.data?.error || 'Erro ao salvar processo.'
       setError(msg)
     } finally {
       setLoading(false)
@@ -127,7 +128,7 @@ export function CadastroProcessoModal({ isOpen, onClose, onSuccess, cnjInicial, 
             </label>
             <select
               value={form.clientePolo}
-              onChange={e => setForm(prev => ({ ...prev, clientePolo: e.target.value as any }))}
+              onChange={e => setForm(prev => ({ ...prev, clientePolo: e.target.value as 'ATIVO' | 'PASSIVO' | 'TERCEIRO' }))}
               className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
               {POLO_OPTIONS.map(opt => (

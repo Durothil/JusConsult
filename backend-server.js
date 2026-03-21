@@ -1181,7 +1181,12 @@ app.put('/api/escritorio/processos/:cnj', async (req, res) => {
     const { clienteNome, clientePolo, responsavel, monitorar, notas } = req.body;
 
     if (clienteNome !== undefined) updates.cliente_nome = clienteNome;
-    if (clientePolo !== undefined) updates.cliente_polo = clientePolo;
+    if (clientePolo !== undefined) {
+      if (!['ATIVO', 'PASSIVO', 'TERCEIRO'].includes(clientePolo)) {
+        return res.status(400).json({ error: 'clientePolo deve ser ATIVO, PASSIVO ou TERCEIRO' });
+      }
+      updates.cliente_polo = clientePolo;
+    }
     if (responsavel !== undefined) updates.responsavel = responsavel;
     if (monitorar !== undefined) updates.monitorar = monitorar;
     if (notas !== undefined) updates.notas = notas;

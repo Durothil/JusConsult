@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import Button from '@/components/common/Button'
 import Badge from '@/components/common/Badge'
@@ -99,16 +99,19 @@ export default function MeusProcessos() {
     }
   }
 
-  const processosFiltered = processos.filter(p => {
+  const processosFiltered = useMemo(() => processos.filter(p => {
     const matchTexto = filtro === '' ||
       p.cnj.includes(filtro) ||
       p.clienteNome.toLowerCase().includes(filtro.toLowerCase()) ||
       (p.responsavel || '').toLowerCase().includes(filtro.toLowerCase())
     const matchPolo = filtroPolo === 'TODOS' || p.clientePolo === filtroPolo
     return matchTexto && matchPolo
-  })
+  }), [processos, filtro, filtroPolo])
 
-  const totalAlertas = processos.reduce((acc, p) => acc + (p.alertasNaoLidos || 0), 0)
+  const totalAlertas = useMemo(
+    () => processos.reduce((acc, p) => acc + (p.alertasNaoLidos || 0), 0),
+    [processos]
+  )
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-8">
