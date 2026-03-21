@@ -59,6 +59,7 @@ const pdfLimiter = rateLimit({
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Middleware
+app.set('trust proxy', 1); // Confiar no primeiro proxy (nginx, Railway, etc.) para IP real no rate limiter
 app.use(cors({
   origin: process.env.ALLOWED_ORIGIN || 'http://localhost:5173',
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
@@ -1176,7 +1177,10 @@ app.put('/api/escritorio/processos/:cnj', async (req, res) => {
   try {
     if (!supabase) return res.status(503).json({ error: 'Supabase não configurado' });
 
-    const cnj = decodeURIComponent(req.params.cnj);
+    const cnjRaw = decodeURIComponent(req.params.cnj);
+    const cnjV = validateCNJ(cnjRaw);
+    if (!cnjV.ok) return res.status(400).json({ error: cnjV.error });
+    const cnj = cnjV.value;
     const updates = {};
     const { clienteNome, clientePolo, responsavel, monitorar, notas } = req.body;
 
@@ -1217,6 +1221,9 @@ app.delete('/api/escritorio/processos/:cnj', async (req, res) => {
     if (!supabase) return res.status(503).json({ error: 'Supabase não configurado' });
 
     const cnj = decodeURIComponent(req.params.cnj);
+    const cnjV = validateCNJ(cnj);
+    if (!cnjV.ok) return res.status(400).json({ error: cnjV.error });
+
     const { error } = await supabase
       .from('escritorio_processos')
       .delete()

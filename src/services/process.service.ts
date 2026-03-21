@@ -48,8 +48,10 @@ export async function getProcessByCNJ(cnj: string): Promise<Process | null> {
 
     const ttl = getTTLForType(CACHE_TYPE)
     setCache(cacheKey, data, ttl)
-    await updateCacheMetadata(CACHE_TYPE, cnj, ttl)
-    await saveProcess(data)
+
+    // Fire-and-forget: falha do Supabase não bloqueia retorno dos dados MCP
+    updateCacheMetadata(CACHE_TYPE, cnj, ttl).catch(e => console.warn(`[cache] updateCacheMetadata falhou para ${cnj}:`, e))
+    saveProcess(data).catch(e => console.warn(`[cache] saveProcess falhou para ${cnj}:`, e))
 
     logAccess('FETCH_MCP', 'process', cnj)
     return data
@@ -118,8 +120,8 @@ export async function getProcessParties(cnj: string): Promise<Party[]> {
 
     const ttl = getTTLForType('process_parties')
     setCache(cacheKey, data, ttl)
-    await updateCacheMetadata('process_parties', cnj, ttl)
-    await saveParties(cnj, data)
+    updateCacheMetadata('process_parties', cnj, ttl).catch(e => console.warn(`[cache] updateCacheMetadata parties falhou para ${cnj}:`, e))
+    saveParties(cnj, data).catch(e => console.warn(`[cache] saveParties falhou para ${cnj}:`, e))
 
     return data
   } catch (error) {
@@ -159,8 +161,8 @@ export async function getProcessMovements(cnj: string): Promise<ProcessMovement[
 
     const ttl = getTTLForType('process_movements')
     setCache(cacheKey, data, ttl)
-    await updateCacheMetadata('process_movements', cnj, ttl)
-    await saveMovements(cnj, data)
+    updateCacheMetadata('process_movements', cnj, ttl).catch(e => console.warn(`[cache] updateCacheMetadata movements falhou para ${cnj}:`, e))
+    saveMovements(cnj, data).catch(e => console.warn(`[cache] saveMovements falhou para ${cnj}:`, e))
 
     return data
   } catch (error) {

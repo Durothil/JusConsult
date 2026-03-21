@@ -107,7 +107,7 @@ export async function saveParties(cnj: string, parties: any[]): Promise<void> {
         })
 
         if (lawyersPayload.length > 0) {
-          await supabase.from('process_lawyers').upsert(lawyersPayload)
+          await supabase.from('process_lawyers').upsert(lawyersPayload, { onConflict: 'party_id,nome' })
         }
       }
     }
