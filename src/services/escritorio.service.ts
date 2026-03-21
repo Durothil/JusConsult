@@ -7,12 +7,12 @@ import type {
 } from '@/types/escritorio'
 
 export async function listarProcessos(): Promise<EscritorioProcesso[]> {
-  const { data } = await apiClient.get('/escritorio/processos')
+  const { data } = await apiClient.get('/api/escritorio/processos')
   return data
 }
 
 export async function cadastrarProcesso(input: CadastroProcessoInput): Promise<EscritorioProcesso> {
-  const { data } = await apiClient.post('/escritorio/processos', input)
+  const { data } = await apiClient.post('/api/escritorio/processos', input)
   return data
 }
 
@@ -20,30 +20,30 @@ export async function atualizarProcesso(
   cnj: string,
   updates: Partial<CadastroProcessoInput>
 ): Promise<void> {
-  await apiClient.put(`/escritorio/processos/${encodeURIComponent(cnj)}`, updates)
+  await apiClient.put(`/api/escritorio/processos/${encodeURIComponent(cnj)}`, updates)
 }
 
 export async function removerProcesso(cnj: string): Promise<void> {
-  await apiClient.delete(`/escritorio/processos/${encodeURIComponent(cnj)}`)
+  await apiClient.delete(`/api/escritorio/processos/${encodeURIComponent(cnj)}`)
 }
 
 export async function monitorarProcesso(cnj: string): Promise<MonitoramentoResultado> {
-  const { data } = await apiClient.post(`/escritorio/monitorar/${encodeURIComponent(cnj)}`)
+  const { data } = await apiClient.post(`/api/escritorio/monitorar/${encodeURIComponent(cnj)}`)
   return data
 }
 
 export async function monitorarTodos(): Promise<{ mensagem: string; processos: string[] }> {
-  const { data } = await apiClient.post('/escritorio/monitorar')
+  const { data } = await apiClient.post('/api/escritorio/monitorar')
   return data
 }
 
 export async function listarAlertas(): Promise<EscritorioAlerta[]> {
-  const { data } = await apiClient.get('/escritorio/alertas')
+  const { data } = await apiClient.get('/api/escritorio/alertas')
   return data
 }
 
 export async function marcarAlertaLido(id: string): Promise<void> {
-  await apiClient.put(`/escritorio/alertas/${id}/lido`)
+  await apiClient.put(`/api/escritorio/alertas/${id}/lido`)
 }
 
 export async function verificarCadastro(cnj: string): Promise<EscritorioProcesso | null> {

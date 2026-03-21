@@ -2,8 +2,6 @@ import React, { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import Card, { CardContent, CardHeader } from '@/components/common/Card'
 import Button from '@/components/common/Button'
-import { getProcessByCNJ } from '@/services/process.service'
-import { Spinner } from '@/components/common/Loading'
 import { ErrorAlert } from '@/components/common/ErrorAlert'
 
 const CNJ_REGEX = /^\d{7}-\d{2}\.\d{4}\.\d\.\d{2}\.\d{4}$/
@@ -15,10 +13,9 @@ function validateCNJ(value: string): boolean {
 const Home: React.FC = () => {
   const navigate = useNavigate()
   const [cnj, setCnj] = useState('')
-  const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
-  const handleSearch = async (e: React.FormEvent) => {
+  const handleSearch = (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
 
@@ -32,20 +29,7 @@ const Home: React.FC = () => {
       return
     }
 
-    setLoading(true)
-    try {
-      const process = await getProcessByCNJ(cnj)
-      if (process) {
-        navigate(`/process/${cnj}`)
-      } else {
-        setError('Processo não encontrado')
-      }
-    } catch (err) {
-      setError('Erro ao buscar processo')
-      console.error(err)
-    } finally {
-      setLoading(false)
-    }
+    navigate(`/process/${cnj}`)
   }
 
   return (
@@ -67,8 +51,7 @@ const Home: React.FC = () => {
                 value={cnj}
                 onChange={(e) => setCnj(e.target.value.toUpperCase())}
                 placeholder="Ex: 0000061-33.2026.5.06.0008"
-                disabled={loading}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
               <p className="text-xs text-gray-500 mt-1">
                 Formato: NNNNNNN-DD.AAAA.J.TR.OOOO
@@ -80,11 +63,9 @@ const Home: React.FC = () => {
             <div className="flex gap-3">
               <Button
                 type="submit"
-                disabled={loading}
                 className="flex items-center gap-2"
               >
-                {loading ? <Spinner size="sm" /> : '🔍'}
-                {loading ? 'Buscando...' : 'Buscar Processo'}
+                🔍 Buscar Processo
               </Button>
             </div>
           </form>

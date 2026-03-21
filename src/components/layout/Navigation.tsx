@@ -9,10 +9,12 @@ const Navigation: React.FC = () => {
   const isActive = (path: string) => location.pathname === path
 
   useEffect(() => {
-    listarAlertas()
-      .then(alertas => setAlertasCount(alertas.length))
-      .catch(() => {})
-  }, [location.pathname])
+    listarAlertas().then(a => setAlertasCount(a.length)).catch(() => {})
+    const interval = setInterval(() => {
+      listarAlertas().then(a => setAlertasCount(a.length)).catch(() => {})
+    }, 60_000)
+    return () => clearInterval(interval)
+  }, [])
 
   const navLink = (to: string, label: React.ReactNode) => (
     <Link

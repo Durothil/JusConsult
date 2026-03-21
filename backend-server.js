@@ -61,7 +61,7 @@ const pdfLimiter = rateLimit({
 // Middleware
 app.use(cors({
   origin: process.env.ALLOWED_ORIGIN || 'http://localhost:5173',
-  methods: ['GET', 'POST'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE'],
 }));
 app.use(express.json());
 app.use('/api', generalLimiter);

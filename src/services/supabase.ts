@@ -76,7 +76,7 @@ export async function saveParties(cnj: string, parties: any[]): Promise<void> {
     }))
 
     if (partiesPayload.length > 0) {
-      await supabase.from('process_parties').upsert(partiesPayload)
+      await supabase.from('process_parties').upsert(partiesPayload, { onConflict: 'process_id,nome' })
     }
 
     // Salva advogados de todas as partes em batch

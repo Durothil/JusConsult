@@ -4,269 +4,163 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**RPAtec** (Reactive Process Analysis - TecJustica) is a React/TypeScript MVP frontend for querying Brazilian judicial processes via the TecJustica MCP server. It integrates with Supabase for intelligent caching, reducing MCP calls and accelerating repeated queries.
+**RPAtec** is a React/TypeScript frontend for querying Brazilian judicial processes via the TecJustica MCP server, with a Node.js backend as proxy and Supabase for caching. The system has two runtime processes: the Vite frontend (port 5173) and the Express backend (port 3001).
 
-## Windows Dev Server
-
-`npm run dev` may fail in automated runners (bash scripts can't execute directly). Use:
-```bash
-"C:\\Program Files\\nodejs\\node.exe" node_modules/vite/bin/vite.js --port 5173 --host
-```
-Preview servers are configured in `.claude/launch.json` as `"dev"` (frontend) and `"backend"`.
-
-## Development Commands
+## Running the System
 
 ```bash
-# Start dev server (Vite, localhost:5173 or next available port)
+# Frontend (Vite)
 npm run dev
 
-# Build for production
+# Backend (required for all API calls)
+node backend-server.js
+
+# Type checking (zero errors required before any commit)
+npx tsc --noEmit
+
+# Build
 npm run build
-
-# Preview production build locally
-npm run preview
-
-# Type checking
-npm run type-check
-
-# Linting (configured with ESLint)
-npm run lint
-
-# Testing (when configured)
-npm run test
 ```
 
-## Project Structure
+**Windows bash runner**: `npm run dev` may fail in automated bash scripts. Use directly:
+```bash
+"C:\\Program Files\\nodejs\\node.exe" node_modules/vite/bin/vite.js --port 5173 --host
+"C:\\Program Files\\nodejs\\node.exe" backend-server.js
+```
+
+Preview servers are configured in `.claude/launch.json` as `"dev"` and `"backend"`.
+
+## Architecture
+
+### Two API Clients — Critical Distinction
+
+There are **two separate Axios clients** with different base URL conventions:
+
+| Client | File | Base URL | Path format |
+|--------|------|----------|-------------|
+| `backendClient` | `mcp.service.ts` | `VITE_API_BASE_URL` (= `http://localhost:3001`) | includes `/api/` prefix: `/api/process/...` |
+| `apiClient` | `api.ts` | `VITE_API_BASE_URL` (= `http://localhost:3001`) | includes `/api/` prefix: `/api/escritorio/...` |
+
+Both clients use `VITE_API_BASE_URL=http://localhost:3001` (no `/api` suffix). All service calls must include `/api/` in their paths. If you add a new service using `apiClient`, prefix every path with `/api/`.
+
+### Data Flow
 
 ```
-src/
-├── components/
-│   ├── layout/           # Header, Navigation, Layout wrapper
-│   ├── common/           # Reusable UI: Button, Card, Badge, Loading, Empty, Tabs
-│   └── process/          # Process-specific (not yet componentized from pages)
-├── pages/
-│   ├── Home.tsx          # Landing/search entry point
-│   ├── ProcessDetail.tsx # Full process view with 4 tabs
-│   ├── DocumentViewer.tsx # Document text viewer with copy/PDF actions
-│   ├── PrecedentsPage.tsx # Legal precedent search interface
-│   └── NotFound.tsx      # 404 fallback
-├── services/
-│   ├── api.ts            # Axios HTTP client with baseURL
-│   ├── supabase.ts       # Supabase client initialization
-│   ├── cache.ts          # TTL/cache logic utilities
-│   ├── process.service.ts
-│   ├── document.service.ts
-│   ├── precedent.service.ts
-│   └── mock/             # Mock data for dev (mockProcessData.ts, etc.)
-├── types/
-│   ├── process.ts        # Process, Party, Movement interfaces
-│   ├── document.ts       # Document interface
-│   └── precedent.ts      # Precedent interface
-├── hooks/                # React Query hooks (useProcess, useDocuments, etc.)
-├── App.tsx               # Router setup with React Router v6
-└── main.tsx
+Component → Hook (React Query) → Service → [Memory Cache] → Backend REST API → MCP Server → Supabase write
+```
+
+**Two cache layers:**
+1. **Memory cache** (`src/services/cache.ts`) — in-process Map, lost on page refresh, checked first
+2. **Supabase** — persistent, TTL tracked in `cache_metadata` table
+
+Services in `src/services/process.service.ts`, `document.service.ts`, `precedent.service.ts` all follow this pattern:
+```ts
+const cached = getCache<T>(cacheKey)
+if (cached) return cached
+const data = await mcpService.callXxx(...)
+setCache(cacheKey, data, ttl)
+await updateCacheMetadata(type, id, ttl)
+await saveToSupabase(data)
+return data
+```
+
+`escritorio.service.ts` does **not** use the cache layer — escritório data is mutable user data, not MCP cache.
+
+### Backend (`backend-server.js`)
+
+Single-file Express server with three rate limiters:
+- `generalLimiter`: 120 req/min on all `/api/*`
+- `mcpLimiter`: 20 req/min on MCP-heavy endpoints
+- `pdfLimiter`: 10 req/min on PDF proxy
+
+Key backend responsibilities:
+- Proxies MCP tool calls via `@modelcontextprotocol/sdk` (SSE/Streamable HTTP transport)
+- Serves all `/api/escritorio/*` CRUD routes backed by Supabase
+- Proxies PDF downloads through `/api/documento-pdf/:cnj/:docId`
+- Writes audit logs to Supabase `audit_logs` table (fire-and-forget)
+
+MCP session management: a new `Client` is created per tool call (`callMCPTool()`), with exponential backoff retry (3 attempts). The client connects, calls one tool, then is abandoned (no connection pooling by design).
+
+### Escritório Feature
+
+Pages/components for law office process management:
+- `src/pages/MeusProcessos.tsx` — list, filter, CRUD
+- `src/components/process/CadastroProcessoModal.tsx` — create/edit modal
+- `src/services/escritorio.service.ts` — all REST calls to `/api/escritorio/*`
+- `src/types/escritorio.ts` — interfaces
+
+Supabase tables: `escritorio_processos`, `escritorio_alertas` (migration: `supabase/migrations/002_escritorio.sql`).
+
+Monitoring logic (backend): `POST /api/escritorio/monitorar/:cnj` fetches current movements via MCP, hashes the most recent one, compares with stored `ultimo_hash_movimento`, and creates alerts on change.
+
+### React Query Setup
+
+`QueryClient` is in `src/App.tsx` with `staleTime: 5min` as default. Individual hooks override:
+- `useProcess`, `useProcessParties` — `staleTime: 24h`
+- `useProcessMovements`, `useProcessDocuments` — `staleTime: 6h`
+- `usePrecedents` — `staleTime: 7d`, only runs when `enabled=true`
+
+## Supabase
+
+**Project**: `https://jtvojfqjtwfwcvqocadk.supabase.co`
+
+Tables: `processes`, `process_parties`, `process_lawyers`, `process_movements`, `process_documents`, `precedents_cache`, `cache_metadata`, `audit_logs`, `escritorio_processos`, `escritorio_alertas`.
+
+When creating new tables, always run `GRANT SELECT, INSERT, UPDATE, DELETE ON <table> TO anon, authenticated, service_role` after the migration — Supabase does not grant DML to these roles automatically for tables created via migrations.
+
+Migrations: `supabase/migrations/001_init.sql`, `supabase/migrations/002_escritorio.sql`.
+
+## Environment Variables
+
+```env
+VITE_USE_MOCK=false
+VITE_API_BASE_URL=http://localhost:3001       # NO /api suffix
+VITE_SUPABASE_URL=https://jtvojfqjtwfwcvqocadk.supabase.co
+VITE_SUPABASE_KEY=<anon key>
+BACKEND_PORT=3001
+PROXY_TARGET_URL=https://tecjusticamcp-lite-production.up.railway.app/mcp
+TECJUSTICA_AUTH_TOKEN=<bearer token>          # backend exits if missing
 ```
 
 ## Routing
 
-Defined in `src/App.tsx` with React Router v6:
+| Route | Page |
+|-------|------|
+| `/` | `Home.tsx` — CNJ search, navigates directly without pre-fetch |
+| `/process/:cnj` | `ProcessDetail.tsx` — 4 tabs (overview, parties, movements, documents) |
+| `/document/:documentId` | `DocumentViewer.tsx` — requires `location.state.cnj` |
+| `/precedents` | `PrecedentsPage.tsx` |
+| `/search-cpf` | `SearchCPF.tsx` |
+| `/meus-processos` | `MeusProcessos.tsx` |
 
-| Route | Page | Purpose |
-|-------|------|---------|
-| `/` | Home.tsx | Search entry point |
-| `/process/:cnj` | ProcessDetail.tsx | Full process details + tabs |
-| `/document/:documentId` | DocumentViewer.tsx | Document text + actions |
-| `/precedents` | PrecedentsPage.tsx | Precedent search |
-| `*` | NotFound.tsx | 404 |
-
-## High-Level Architecture
-
-### Data Flow Pattern
-
-1. **Request**: Component/hook calls service function (e.g., `getProcessByCNJ(cnj)`)
-2. **Cache Check**: Service checks Supabase `cache_metadata` table for TTL validity
-3. **Cache Hit**: If TTL valid, return data from `processes` table (or relevant table)
-4. **Cache Miss**: Call MCP server via HTTP, store result in Supabase, update TTL metadata
-5. **Return**: Component receives data + renders
-
-**Key files**:
-- `src/services/cache.ts` — `checkCache()`, `updateCacheMetadata()` logic
-- `src/services/process.service.ts` — Implements pattern for process queries
-- `src/services/supabase.ts` — Supabase client + utilities
-
-### State Management
-
-- **React Query** (TanStack Query) for server state + caching
-- **useState** for local UI state (tabs, form inputs, loading flags)
-- **useParams** for route params (e.g., CNJ number from `/process/:cnj`)
-- **useNavigate** for programmatic navigation
-
-### Page State Patterns
-
-All pages follow this interface pattern:
-
-```typescript
-interface PageState {
-  data: DataType | null
-  loading: boolean
-  error: string | null
-  [otherFields]: any
-}
-```
-
-Example: `ProcessDetail` uses `ProcessState` with process, parties, movements, documents fields.
-
-**Always use**:
-- `useEffect` with `Promise.all()` for parallel loads
-- Mock data as fallback during dev (toggle via `VITE_USE_MOCK` env var)
-- Proper error boundaries + Empty/PageLoading components for UX
-
-## Supabase Integration
-
-### Caching Strategy
-
-**TTL by Data Type** (defined in `cache_metadata` table):
-
-| Type | TTL | Reason |
-|------|-----|--------|
-| `process_overview` | 24h | Stable, rarely changes |
-| `process_movements` | 6h | Frequent updates |
-| `process_documents` | 6h | New attachments added |
-| `precedents` | 7d | Jurisprudence stable |
-
-**Key tables**:
-- `processes` — Process summaries + metadata
-- `process_parties` — Parties + lawyers (complete data, no masking)
-- `process_movements` — Immutable timeline
-- `process_documents` — Document metadata + extracted text
-- `precedents_cache` — Search results cache
-- `cache_metadata` — TTL tracking per data type
-- `audit_logs` — Immutable access logs
-
-**Setup**:
-- URL: `https://jtvojfqjtwfwcvqocadk.supabase.co`
-- Key: See `.env` file
-- Migrations: Run SQL from `supabase/migrations/001_init.sql`
-
-## Environment Variables
-
-Create `.env` (not in git):
-
-```env
-# Vite
-VITE_USE_MOCK=false                                    # true=mocks, false=real API
-
-# Supabase
-VITE_SUPABASE_URL=https://jtvojfqjtwfwcvqocadk.supabase.co
-VITE_SUPABASE_KEY=sb_publishable_YfNnAZVWPzuS39xVgXAueQ_AND-Luk0
-
-# API (MCP gateway)
-VITE_API_BASE_URL=https://tecjusticamcp-lite-production.up.railway.app
-TECJUSTICA_AUTH_TOKEN=<your-bearer-token>
-```
-
-## TecJustica MCP Integration
-
-The MCP server exposes 8+ tools for judicial data:
-- `pdpj_visao_geral_processo` — Process summary by CNJ
-- `pdpj_buscar_processos` — Find by CPF/CNPJ
-- `pdpj_buscar_precedentes` — Search jurisprudence
-- `pdpj_list_partes`, `pdpj_list_movimentos`, `pdpj_list_documentos`
-- `pdpj_read_documento`, `pdpj_read_documentos_batch`, `pdpj_get_documento_url`
-
-**Usage in services**: Wrap MCP calls in try/catch, always check cache first, store results in Supabase.
-
-## UI/Design Principles
-
-- **Tailwind CSS** for utility-first styling
-- **Refined minimalist aesthetic**: Clean typography, generous spacing, serif fonts for legal content
-- **Consistent colors**: Blue accent (`blue-600`), gray scales for neutrals
-- **Components**: Reusable Button, Card, Badge, Tab components in `src/components/common/`
-- **Responsiveness**: Mobile-first with `md:` breakpoints
-
-## Common Development Workflows
-
-### Adding a New Page
-
-1. Create `src/pages/NewPage.tsx` with useState/useEffect pattern
-2. Add route in `src/App.tsx` under `<Route element={<Layout />}>`
-3. Create service functions in `src/services/` if needed
-4. Use mock data during dev (`VITE_USE_MOCK=true`)
-
-### Adding a Service Function
-
-1. Create in `src/services/[domain].service.ts`
-2. Follow pattern: check cache → call MCP → update Supabase → return
-3. Use `cache.ts` utilities for TTL management
-4. Import and use in pages/hooks
-
-### Testing Routes
-
-```bash
-npm run dev
-# Navigate to http://localhost:5173 (or printed port)
-# Test routes: /, /process/:cnj, /document/:id, /precedents, /404
-```
-
-### Working with Mock Data
-
-Mock data lives in `src/services/mock/`. Use `VITE_USE_MOCK=true` in `.env` to bypass HTTP calls. Useful for rapid UI development without backend.
-
-## Path Resolution
-
-- Import alias `@/` resolves to `src/`
-- Configured in `vite.config.ts` and `tsconfig.json`
-- Always use: `import Component from '@/components/...'`
-
-## Build & Deployment
-
-```bash
-npm run build  # Outputs to dist/
-npm run preview # Test production build locally
-```
-
-Deploy `dist/` folder to static host (Vercel, Netlify, etc).
-
-## Type Checking
-
-TypeScript strict mode enabled. Always run before committing:
-
-```bash
-npx tsc --noEmit
-```
-
-Zero errors required before marking any TypeScript task complete.
+`DocumentViewer` requires `cnj` passed via React Router `state` (set in `ProcessDetail` when clicking "Ler"). Without it, the viewer shows an error state.
 
 ## Gotchas & Hard-Won Lessons
 
-### Cache Layer
-- `CACHE_TTL` keys in `src/services/cache.ts` are **lowercase** — must match exactly what services pass to `checkCache()` (e.g. `'process_overview'`, not `'PROCESS_OVERVIEW'`)
-- React Query `staleTime` in `src/hooks/` should match the Supabase TTL for the same data type
+### URL Prefix
+`VITE_API_BASE_URL` is `http://localhost:3001` (no `/api`). All service calls in both `api.ts`-based and `mcp.service.ts`-based clients must include `/api/` in their path strings. Missing `/api/` causes silent 404s.
 
-### Backend
-- `backend-server.js` calls `process.exit(1)` if `TECJUSTICA_AUTH_TOKEN` env var is missing (by design — no silent fallback)
-- Network errors in the frontend console are **expected** when the backend is not running locally
+### CORS
+Backend CORS is configured with `methods: ['GET', 'POST', 'PUT', 'DELETE']`. If you add new HTTP methods on the backend, also add them here.
 
-### Supabase Writes
-Always batch: map to array then single `upsert(array, { onConflict: 'field' })`.
-Never `for (const item of items) { await supabase.from(...).upsert(item) }` — this generates N sequential DB calls.
+### Supabase Upserts
+Always pass `{ onConflict: 'field' }` to `upsert()`. Without it, repeated saves create duplicates. Use the unique constraint column (e.g., `cnj`, `hash_unico`, `process_id,nome`).
 
-## Known Limitations (MVP)
+### Cache Keys
+`CACHE_TTL` keys in `src/services/cache.ts` are lowercase (e.g., `'process_overview'`, `'process_movements'`). Must match exactly what services pass to `getCacheKey()`.
 
-- ❌ No user authentication (single-tenant for now)
-- ❌ No real-time updates (cache TTL-based only)
-- ❌ No offline support
-- ⚠️ Mock data used in dev; real MCP integration pending
+### MCP Response Parsing
+Each MCP tool has its own parser in the backend (`parseVisaoGeral`, `parseMovimentos`, `parseDocumentos`, `parsePrecedentes`, `parseBuscaProcessos`). MCP responses come as text content — always use `parseMCPResponse(result, toolName)` then the tool-specific parser.
 
-## Roadmap (v2+)
+### Navigation from Home
+`Home.tsx` navigates directly to `/process/:cnj` without pre-fetching — `ProcessDetail` handles loading and the "not found" state. Do not add a pre-fetch back.
 
-- User authentication + personal dashboards
-- Advanced filtering (date range, tribunal, status)
-- Export to PDF
-- Dark mode
-- Notifications on case updates
-- Jurisprudence analytics/trends
+### Navigation Alert Polling
+`Navigation.tsx` polls `GET /api/escritorio/alertas` every 60s via `setInterval`, not on route change. This is intentional to avoid hammering the backend on every click.
+
+### Backend Startup
+`backend-server.js` calls `process.exit(1)` if `TECJUSTICA_AUTH_TOKEN` is missing. Network errors in the browser console are expected when the backend is not running.
 
 ---
 
-**Last Updated**: 2026-03-19
+**Last Updated**: 2026-03-21
