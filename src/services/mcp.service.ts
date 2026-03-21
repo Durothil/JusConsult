@@ -6,12 +6,14 @@
 import axios from 'axios'
 
 const BACKEND_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001'
+const API_SECRET = import.meta.env.VITE_API_SECRET
 
 const backendClient = axios.create({
   baseURL: BACKEND_URL,
   timeout: 30000,
   headers: {
     'Content-Type': 'application/json',
+    ...(API_SECRET ? { 'X-Api-Key': API_SECRET } : {}),
   },
 })
 

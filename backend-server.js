@@ -61,13 +61,42 @@ const pdfLimiter = rateLimit({
 
 // Middleware
 app.set('trust proxy', 1); // Confiar no primeiro proxy (nginx, Railway, etc.) para IP real no rate limiter
-app.use(helmet());
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      imgSrc: ["'self'", 'data:', 'https:'],
+      connectSrc: ["'self'", process.env.VITE_SUPABASE_URL || ''].filter(Boolean),
+      frameSrc: ["'none'"],
+      objectSrc: ["'none'"],
+    },
+  },
+  crossOriginEmbedderPolicy: false, // permite PDFs inline
+}));
 app.use(cors({
   origin: process.env.ALLOWED_ORIGIN || 'http://localhost:5173',
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
 }));
 app.use(express.json());
 app.use('/api', generalLimiter);
+
+// ─── Autenticação de origem ───────────────────────────────────────────────────
+const API_SECRET = process.env.API_SECRET;
+if (API_SECRET) {
+  app.use('/api', (req, res, next) => {
+    if (req.path === '/health') return next(); // health check público
+    const key = req.headers['x-api-key'];
+    if (key !== API_SECRET) {
+      return res.status(401).json({ error: 'Não autorizado' });
+    }
+    next();
+  });
+} else {
+  console.warn('⚠️  API_SECRET não definido — backend aceita qualquer origem (defina em produção)');
+}
+// ─────────────────────────────────────────────────────────────────────────────
 
 // Configuração MCP
 const MCP_SERVER_URL = process.env.PROXY_TARGET_URL || 'https://tecjusticamcp-lite-production.up.railway.app/mcp';

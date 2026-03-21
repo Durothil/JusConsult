@@ -13,6 +13,7 @@ const client: AxiosInstance = axios.create({
   timeout: 10000,
   headers: {
     'Content-Type': 'application/json',
+    ...(env.VITE_API_SECRET ? { 'X-Api-Key': env.VITE_API_SECRET } : {}),
   },
 })
 

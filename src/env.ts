@@ -5,6 +5,7 @@ const envSchema = z.object({
   VITE_USE_MOCK: z.enum(['true', 'false']).default('false'),
   VITE_SUPABASE_URL: z.string().url().optional(),
   VITE_SUPABASE_KEY: z.string().optional(),
+  VITE_API_SECRET: z.string().optional(),
 })
 
 const _parsed = envSchema.safeParse(import.meta.env)
