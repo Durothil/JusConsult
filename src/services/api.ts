@@ -3,9 +3,10 @@
  */
 
 import axios, { AxiosInstance, AxiosError } from 'axios'
+import { env } from '../env'
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001'
-const USE_MOCK = import.meta.env.VITE_USE_MOCK === 'true'
+const API_BASE_URL = env.VITE_API_BASE_URL
+const USE_MOCK = env.VITE_USE_MOCK === 'true'
 
 const client: AxiosInstance = axios.create({
   baseURL: API_BASE_URL,

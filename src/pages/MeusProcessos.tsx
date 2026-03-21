@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import Button from '@/components/common/Button'
 import Badge from '@/components/common/Badge'
@@ -40,7 +40,8 @@ export default function MeusProcessos() {
   const [modalOpen, setModalOpen] = useState(false)
   const [editando, setEditando] = useState<EscritorioProcesso | undefined>()
   const [monitorando, setMonitorando] = useState<string | null>(null)
-  const [toastMsg, setToastMsg] = useState<string | null>(null)
+  const [toasts, setToasts] = useState<{ id: number; msg: string }[]>([])
+  const toastIdRef = useRef(0)
 
   const carregar = useCallback(async () => {
     try {
@@ -58,8 +59,9 @@ export default function MeusProcessos() {
   useEffect(() => { carregar() }, [carregar])
 
   const showToast = (msg: string) => {
-    setToastMsg(msg)
-    setTimeout(() => setToastMsg(null), 4000)
+    const id = ++toastIdRef.current
+    setToasts(prev => [...prev, { id, msg }])
+    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 4000)
   }
 
   const handleRemover = async (cnj: string, clienteNome: string) => {
@@ -115,12 +117,14 @@ export default function MeusProcessos() {
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-8">
-      {/* Toast */}
-      {toastMsg && (
-        <div className="fixed top-4 right-4 z-50 bg-gray-900 text-white px-4 py-3 rounded-lg shadow-lg text-sm max-w-sm">
-          {toastMsg}
-        </div>
-      )}
+      {/* Toast stack */}
+      <div className="fixed top-4 right-4 z-50 flex flex-col gap-2">
+        {toasts.map(t => (
+          <div key={t.id} className="bg-gray-900 text-white px-4 py-3 rounded-lg shadow-lg text-sm max-w-sm">
+            {t.msg}
+          </div>
+        ))}
+      </div>
 
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
