@@ -72,10 +72,12 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON diligencias TO anon, authenticated, serv
 | Método | Rota | Comportamento |
 |--------|------|---------------|
 | `GET` | `/api/diligencias` | Lista todas. Query param opcional: `?responsavel=<valor>` |
-| `POST` | `/api/diligencias` | Aceita objeto único **ou array** (para migração em lote) |
-| `PUT` | `/api/diligencias/:id` | Atualiza campos enviados no body (merge parcial) |
+| `POST` | `/api/diligencias` | Aceita objeto único **ou array** (migração). Array usa upsert com `onConflict: 'id'` — idempotente |
+| `PUT` | `/api/diligencias/:id` | Atualiza somente os campos enviados no body — Supabase `.update()` é parcial por padrão, sem fetch prévio necessário |
 | `DELETE` | `/api/diligencias/:id` | Remove por ID |
 | `GET` | `/api/diligencias/cnj/:cnj` | Lista todas as diligências de um CNJ |
+
+> **Atenção Express**: registrar `/api/diligencias/cnj/:cnj` **antes** de qualquer rota `/:id` para evitar que Express interprete `"cnj"` como valor de `:id`.
 
 **Conversão de campos**: backend recebe camelCase do frontend, persiste snake_case no Supabase, retorna camelCase. Mesmo padrão dos endpoints `/api/escritorio/*`.
 
@@ -157,7 +159,7 @@ async function migrarLocalStorageSeNecessario(): Promise<void> {
     localStorage.setItem('rpatec_diligencias_migrated', 'true')
     return
   }
-  await apiClient.post('/api/diligencias', local)  // POST em lote
+  await apiClient.post('/api/diligencias', local)  // POST em lote — backend usa upsert onConflict: 'id'
   localStorage.setItem('rpatec_diligencias_migrated', 'true')
   localStorage.removeItem('rpatec_diligencias')
 }
