@@ -308,7 +308,7 @@ const FilaDiligencias: React.FC = () => {
               </button>
               <button
                 type="button"
-                onClick={() => { concluir(confirmarConclusao); setConfirmarConclusao(null) }}
+                onClick={() => { concluir(confirmarConclusao).finally(() => setConfirmarConclusao(null)) }}
                 className="px-4 py-2 text-sm bg-green-600 text-white rounded hover:bg-green-700"
               >
                 Confirmar
