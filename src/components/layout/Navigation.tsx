@@ -71,6 +71,7 @@ const Navigation: React.FC = () => {
               </>
             )}
             {navLink('/dashboard-operacional', '📊 Dashboard')}
+            {navLink('/dashboard-tempos', '⏱ Tempos')}
             {navLink('/search-cpf', 'Buscar por CPF/CNPJ')}
             {navLink('/precedents', 'Precedentes')}
           </div>
