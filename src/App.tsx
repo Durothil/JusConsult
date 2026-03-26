@@ -12,6 +12,7 @@ import MeusProcessos from '@/pages/MeusProcessos'
 import FilaDiligencias from '@/pages/FilaDiligencias'
 import DashboardOperacional from '@/pages/DashboardOperacional'
 import DashboardTempos from '@/pages/DashboardTempos'
+import ChatIA from '@/pages/ChatIA'
 import NotFound from '@/pages/NotFound'
 import Login from '@/pages/Login'
 
@@ -43,6 +44,7 @@ function App() {
                 <Route path="/diligencias" element={<FilaDiligencias />} />
                 <Route path="/dashboard-operacional" element={<DashboardOperacional />} />
                 <Route path="/dashboard-tempos" element={<DashboardTempos />} />
+                <Route path="/ia" element={<ChatIA />} />
                 <Route path="*" element={<NotFound />} />
               </Route>
             </Route>
