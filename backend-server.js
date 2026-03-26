@@ -151,7 +151,7 @@ function audit(req, acao, tipoDado, referenciaId) {
   }).then(({ error }) => {
     if (error) console.warn(`[audit] Falha ao registrar ${acao}:`, error.message);
   }).catch((err) => {
-    console.warn(`[audit] Exceção ao registrar ${acao}:`, err.message);
+    console.warn(`[audit] Exceção ao registrar ${acao}:`, err instanceof Error ? err.message : String(err));
   });
 }
 
@@ -205,12 +205,12 @@ async function initializeMCPClient() {
         console.log(`   - ${tool.name}`);
       });
     } catch (e) {
-      console.warn(`⚠️ Não foi possível listar tools:`, e.message);
+      console.warn(`⚠️ Não foi possível listar tools:`, e instanceof Error ? e.message : String(e));
     }
 
     return mcpClient;
   } catch (error) {
-    console.error(`❌ Erro ao inicializar MCP Client:`, error.message);
+    console.error(`❌ Erro ao inicializar MCP Client:`, error instanceof Error ? error.message : String(error));
     clientConnected = false;
     throw error;
   }
@@ -276,11 +276,12 @@ async function callMCPTool(toolName, toolInput) {
 
     } catch (error) {
       lastError = error;
-      const isTimeout  = error.message?.includes('Timeout');
-      const isSession  = error.message?.includes('session') || error.message?.includes('connect');
+      const msg        = error instanceof Error ? error.message : String(error);
+      const isTimeout  = msg.includes('Timeout');
+      const isSession  = msg.includes('session') || msg.includes('connect');
       const label      = isTimeout ? '⏱ TIMEOUT' : isSession ? '🔌 SESSÃO' : '❌ ERRO';
 
-      console.error(`${label} tentativa ${attempt}/${MAX_RETRIES} — ${toolName}: ${error.message}`);
+      console.error(`${label} tentativa ${attempt}/${MAX_RETRIES} — ${toolName}: ${msg}`);
 
       // Descarta cliente para forçar reconexão
       mcpClient = null;

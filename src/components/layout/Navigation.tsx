@@ -13,6 +13,7 @@ const Navigation: React.FC = () => {
   const isActive = (path: string) => location.pathname === path
 
   useEffect(() => {
+    if (!user) return
     const loadAlertas = () => {
       listarAlertas()
         .then(a => setAlertasCount(a.length))
@@ -27,7 +28,7 @@ const Navigation: React.FC = () => {
     loadUrgentes()
     const interval = setInterval(() => { loadAlertas(); loadUrgentes() }, 60_000)
     return () => clearInterval(interval)
-  }, [])
+  }, [user])
 
   const navLink = (to: string, label: React.ReactNode) => (
     <Link
