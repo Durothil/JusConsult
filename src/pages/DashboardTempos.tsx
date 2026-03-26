@@ -130,11 +130,11 @@ const DashboardTempos: React.FC = () => {
                       <XAxis dataKey="tribunal" tick={{ fontSize: 12 }} />
                       <YAxis tickFormatter={v => `${v}d`} tick={{ fontSize: 12 }} />
                       <Tooltip
-                        formatter={(v: unknown) => v != null ? `${v} dias` : '—'}
+                        formatter={(v: unknown) => [v != null ? `${v} dias` : '—']}
                       />
                       <Legend />
-                      <Bar dataKey="Dist. → Sentença" fill="#3b82f6" radius={[3, 3, 0, 0]} />
-                      <Bar dataKey="Sentença → Liquidação" fill="#10b981" radius={[3, 3, 0, 0]} />
+                      <Bar dataKey="Dist. → Sentença" fill="#3b82f6" />
+                      <Bar dataKey="Sentença → Liquidação" fill="#10b981" />
                     </BarChart>
                   </ResponsiveContainer>
                 )}
