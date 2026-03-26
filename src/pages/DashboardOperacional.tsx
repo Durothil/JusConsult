@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import Card, { CardContent } from '@/components/common/Card'
 import Button from '@/components/common/Button'
@@ -60,6 +60,32 @@ const DashboardOperacional: React.FC = () => {
     LIGACAO_GABINETE: '📞 Gabinete',
     EMAIL_VARA: '📧 Email',
     RECHECK: '🔄 Revisar',
+  }
+
+  const proximaSemana = useMemo(() => {
+    const hoje = new Date().toISOString().slice(0, 10)
+    const limite = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+    const itens = lista.filter(
+      (d) => d.proximaData && d.proximaData >= hoje && d.proximaData <= limite && d.status !== 'CONCLUIDA'
+    ).sort((a, b) => (a.proximaData ?? '').localeCompare(b.proximaData ?? ''))
+    const porData: Record<string, DiligenciaOperacional[]> = {}
+    for (const d of itens) {
+      const key = d.proximaData!
+      if (!porData[key]) porData[key] = []
+      porData[key].push(d)
+    }
+    return porData
+  }, [lista])
+
+  function formatarDataBR(iso: string): string {
+    const [, m, d] = iso.split('-')
+    const hoje = new Date().toISOString().slice(0, 10)
+    const amanha = new Date(Date.now() + 86400000).toISOString().slice(0, 10)
+    if (iso === hoje) return `Hoje (${d}/${m})`
+    if (iso === amanha) return `Amanhã (${d}/${m})`
+    const diasSemana = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb']
+    const diaSemana = diasSemana[new Date(`${iso}T12:00:00`).getDay()]
+    return `${diaSemana} ${d}/${m}`
   }
 
   return (
@@ -134,6 +160,54 @@ const DashboardOperacional: React.FC = () => {
               </CardContent>
             </Card>
           </div>
+
+          {/* Próximos 7 dias */}
+          <Card>
+            <CardContent>
+              <h2 className="font-semibold text-gray-900 mb-4">📅 Próximos 7 Dias</h2>
+              {Object.keys(proximaSemana).length === 0 ? (
+                <p className="text-gray-400 text-sm text-center py-4">
+                  Nenhuma ação programada para os próximos 7 dias.
+                </p>
+              ) : (
+                <div className="space-y-4">
+                  {Object.entries(proximaSemana).map(([data, itens]) => (
+                    <div key={data}>
+                      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">
+                        {formatarDataBR(data)}
+                        <span className="ml-1 text-gray-400 font-normal normal-case">({itens.length})</span>
+                      </p>
+                      <div className="space-y-1">
+                        {itens.map((d) => (
+                          <div
+                            key={d.id}
+                            className="flex items-center justify-between px-3 py-2 rounded bg-gray-50 hover:bg-gray-100 cursor-pointer text-sm"
+                            onClick={() => navigate(`/process/${d.cnj}`)}
+                          >
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span>{PRIORIDADE_ICON[d.prioridade]}</span>
+                              <span className="truncate text-gray-800 font-medium">
+                                {d.clienteNome ?? d.cnj}
+                              </span>
+                              <span className="text-gray-400 text-xs shrink-0">
+                                {ACAO_LABEL[d.acaoRecomendada]}
+                              </span>
+                            </div>
+                            <span className={`shrink-0 text-xs font-semibold ${
+                              d.prioridade === 'URGENTE' ? 'text-red-600' :
+                              d.prioridade === 'ALTA' ? 'text-yellow-600' : 'text-gray-500'
+                            }`}>
+                              {d.diasParado}d
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
 
           {/* Top 5 urgentes */}
           <Card>

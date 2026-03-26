@@ -1,11 +1,13 @@
 import React, { useEffect, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { listarAlertas } from '@/services/escritorio.service'
+import { listarDiligencias } from '@/services/diligencia.service'
 import { useAuth } from '@/contexts/AuthContext'
 
 const Navigation: React.FC = () => {
   const location = useLocation()
   const [alertasCount, setAlertasCount] = useState(0)
+  const [urgentesCount, setUrgentesCount] = useState(0)
   const { user, signOut } = useAuth()
 
   const isActive = (path: string) => location.pathname === path
@@ -16,8 +18,14 @@ const Navigation: React.FC = () => {
         .then(a => setAlertasCount(a.length))
         .catch(e => console.warn('Falha ao carregar alertas:', e))
     }
+    const loadUrgentes = () => {
+      listarDiligencias()
+        .then(d => setUrgentesCount(d.filter(x => x.prioridade === 'URGENTE' && x.status !== 'CONCLUIDA').length))
+        .catch(() => { /* silencioso */ })
+    }
     loadAlertas()
-    const interval = setInterval(loadAlertas, 60_000)
+    loadUrgentes()
+    const interval = setInterval(() => { loadAlertas(); loadUrgentes() }, 60_000)
     return () => clearInterval(interval)
   }, [])
 
@@ -51,7 +59,17 @@ const Navigation: React.FC = () => {
                 )}
               </>
             )}
-            {navLink('/diligencias', 'Diligências')}
+            {navLink(
+              '/diligencias',
+              <>
+                Diligências
+                {urgentesCount > 0 && (
+                  <span className="inline-flex items-center justify-center w-5 h-5 text-xs font-bold text-white bg-red-500 rounded-full">
+                    {urgentesCount > 9 ? '9+' : urgentesCount}
+                  </span>
+                )}
+              </>
+            )}
             {navLink('/dashboard-operacional', '📊 Dashboard')}
             {navLink('/search-cpf', 'Buscar por CPF/CNPJ')}
             {navLink('/precedents', 'Precedentes')}

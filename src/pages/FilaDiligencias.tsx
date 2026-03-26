@@ -57,6 +57,32 @@ const hoje = new Date().toISOString().slice(0, 10) // 'YYYY-MM-DD'
 const vencida = (d: DiligenciaOperacional): boolean =>
   !!d.proximaData && d.proximaData < hoje && d.status !== 'CONCLUIDA'
 
+function exportarCSV(dados: DiligenciaOperacional[]): void {
+  const headers = ['CNJ', 'Cliente', 'Gargalo', 'Dias Parado', 'Prioridade', 'Ação', 'Status', 'Responsável', 'Prazo', 'Retorno']
+  const rows = dados.map((d) => [
+    d.cnj,
+    d.clienteNome ?? '',
+    d.descricao,
+    d.diasParado,
+    d.prioridade,
+    ACAO_LABEL[d.acaoRecomendada] ?? d.acaoRecomendada,
+    STATUS_LABEL[d.status],
+    d.responsavel ?? '',
+    d.proximaData ?? '',
+    d.retorno ?? '',
+  ])
+  const csv = [headers, ...rows]
+    .map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(','))
+    .join('\n')
+  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `diligencias-${new Date().toISOString().slice(0, 10)}.csv`
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
 function ordenar(lista: DiligenciaOperacional[]): DiligenciaOperacional[] {
   return [...lista].sort((a, b) => {
     const pa = PRIORIDADE_ORDER[a.prioridade]
@@ -122,9 +148,14 @@ const FilaDiligencias: React.FC = () => {
             {lista.filter(d => d.prioridade === 'URGENTE' && d.status !== 'CONCLUIDA').length} urgentes
           </p>
         </div>
-        <Button variant="secondary" onClick={() => navigate('/dashboard-operacional')}>
-          📊 Dashboard
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="secondary" onClick={() => exportarCSV(filtrada)}>
+            ⬇ Exportar CSV
+          </Button>
+          <Button variant="secondary" onClick={() => navigate('/dashboard-operacional')}>
+            📊 Dashboard
+          </Button>
+        </div>
       </div>
 
       {/* Filtros */}
