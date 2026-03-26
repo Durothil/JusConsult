@@ -10,8 +10,6 @@ const Navigation: React.FC = () => {
   const [urgentesCount, setUrgentesCount] = useState(0)
   const { user, signOut } = useAuth()
 
-  const isActive = (path: string) => location.pathname === path
-
   useEffect(() => {
     if (!user) return
     const loadAlertas = () => {
