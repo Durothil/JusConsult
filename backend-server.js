@@ -1496,6 +1496,13 @@ app.post('/api/escritorio/monitorar', async (req, res) => {
   }
 });
 
+function norm(s) { return (s || '').toLowerCase().normalize('NFD').replace(/\p{Mn}/gu, '') }
+function diasEntre(d1, d2) { return Math.round((new Date(d2) - new Date(d1)) / 86400000) }
+function findMov(movs, padroes) {
+  return movs.find(m => padroes.some(p => norm(m.descricao).includes(norm(p))))
+}
+function media(arr) { return arr.length ? Math.round(arr.reduce((a, b) => a + b, 0) / arr.length) : null }
+
 /**
  * GET /api/escritorio/metricas-tempo
  * Métricas de tempo processual por tribunal e tipo de ação
@@ -1543,13 +1550,6 @@ app.get('/api/escritorio/metricas-tempo', generalLimiter, async (req, res) => {
     const SENTENCA = ['sentença', 'julgado', 'procedente', 'improcedente', 'dispositivo', 'resolv']
     const LIQUIDACAO = ['liquidação', 'cumprimento de sentença', 'execução de título', 'cálculo de liquidação', 'rpv', 'precatório', 'requisição de pagamento']
 
-    function norm(s) { return (s || '').toLowerCase().normalize('NFD').replace(/\p{Mn}/gu, '') }
-    function diasEntre(d1, d2) { return Math.round((new Date(d2) - new Date(d1)) / 86400000) }
-    function findMov(movs, padroes) {
-      return movs.find(m => padroes.some(p => norm(m.descricao).includes(norm(p))))
-    }
-    function media(arr) { return arr.length ? Math.round(arr.reduce((a, b) => a + b, 0) / arr.length) : null }
-
     // 4. Calcular métricas
     const byTribunal = {}
     const byTipo = {}
@@ -1564,10 +1564,11 @@ app.get('/api/escritorio/metricas-tempo', generalLimiter, async (req, res) => {
       const tribunal = p.tribunal || 'Não informado'
       const tipo = p.classe || 'Não informado'
       if (!byTribunal[tribunal]) byTribunal[tribunal] = { distSentencaDias: [], sentLiquidDias: [] }
-      if (!byTipo[tipo]) byTipo[tipo] = { temposTotais: [], total: 0 }
-      byTipo[tipo].total++
 
       if (!p.data_abertura) continue
+
+      if (!byTipo[tipo]) byTipo[tipo] = { temposTotais: [], total: 0 }
+      byTipo[tipo].total++
 
       const movSentenca = findMov(movs, SENTENCA)
       const movsAposSentenca = movSentenca
