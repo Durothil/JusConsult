@@ -12,8 +12,32 @@ import rateLimit from 'express-rate-limit';
 import { createClient } from '@supabase/supabase-js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import Anthropic from '@anthropic-ai/sdk';
+import OpenAI from 'openai';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 
 dotenv.config();
+
+// ── Multi-provider AI ────────────────────────────────────────────────────────
+function buildAIProvider() {
+  const preferred = (process.env.AI_PROVIDER || '').toLowerCase()
+  const candidates = preferred
+    ? [preferred, 'anthropic', 'openai', 'gemini']
+    : ['anthropic', 'openai', 'gemini']
+
+  for (const p of [...new Set(candidates)]) {
+    if (p === 'anthropic' && process.env.ANTHROPIC_API_KEY)
+      return { name: 'anthropic', client: new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY }) }
+    if (p === 'openai' && process.env.OPENAI_API_KEY)
+      return { name: 'openai', client: new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) }
+    if (p === 'gemini' && process.env.GEMINI_API_KEY)
+      return { name: 'gemini', client: new GoogleGenerativeAI(process.env.GEMINI_API_KEY) }
+  }
+  return null
+}
+const aiProvider = buildAIProvider()
+if (aiProvider) console.log(`[IA] Provedor ativo: ${aiProvider.name}`)
+else console.warn('[IA] Nenhuma chave de IA configurada — /api/ia/chat retornará 503')
 
 const app = express();
 const PORT = process.env.BACKEND_PORT || 3001;
@@ -1850,6 +1874,92 @@ app.use((err, req, res, next) => {
   console.error('Erro não tratado:', err);
   res.status(500).json({ error: 'Erro interno do servidor' });
 });
+
+// ── IA Chat ──────────────────────────────────────────────────────────────────
+app.get('/api/ia/status', generalLimiter, (_req, res) => {
+  res.json({
+    configurado: !!aiProvider,
+    provedor: aiProvider?.name ?? null,
+  })
+})
+
+app.post('/api/ia/chat', mcpLimiter, async (req, res) => {
+  if (!aiProvider) return res.status(503).json({
+    error: 'IA não configurada. Defina ANTHROPIC_API_KEY, OPENAI_API_KEY ou GEMINI_API_KEY no .env.'
+  })
+
+  const { cnj, pergunta, historico = [] } = req.body
+  if (!pergunta?.trim()) return res.status(400).json({ error: 'Pergunta obrigatória.' })
+
+  try {
+    let contextoProcesso = ''
+    if (cnj) {
+      try {
+        const [visao, movs] = await Promise.allSettled([
+          callMCPTool('pdpj_visao_geral_processo', { cnj }),
+          callMCPTool('pdpj_list_movimentos', { cnj, limit: 15 }),
+        ])
+        if (visao.status === 'fulfilled')
+          contextoProcesso += `\n\n## Visão Geral ${cnj}\n` +
+            JSON.stringify(parseMCPResponse(visao.value, 'pdpj_visao_geral_processo'), null, 2)
+        if (movs.status === 'fulfilled')
+          contextoProcesso += `\n\n## Últimas Movimentações\n` +
+            JSON.stringify(parseMCPResponse(movs.value, 'pdpj_list_movimentos'), null, 2)
+      } catch (mcpErr) {
+        console.error('ia/chat MCP error:', mcpErr.message)
+        contextoProcesso = '\n\n[Dados do processo indisponíveis no momento]'
+      }
+    }
+
+    const systemPrompt =
+      'Você é um assistente jurídico especializado integrado ao sistema JusFlow.\n' +
+      'Responda em português, de forma clara e objetiva para advogados e colaboradores.\n' +
+      'Cite datas e números quando relevante. Não invente informações.\n' +
+      (contextoProcesso ? `\nDados do processo consultado:${contextoProcesso}` : '')
+
+    const messages = [
+      ...historico.map(h => ({ role: h.role, content: h.content })),
+      { role: 'user', content: pergunta },
+    ]
+
+    let resposta = ''
+
+    if (aiProvider.name === 'anthropic') {
+      const r = await aiProvider.client.messages.create({
+        model: 'claude-haiku-4-5',
+        max_tokens: 1024,
+        system: systemPrompt,
+        messages,
+      })
+      resposta = r.content[0].text
+
+    } else if (aiProvider.name === 'openai') {
+      const r = await aiProvider.client.chat.completions.create({
+        model: 'gpt-4o-mini',
+        max_tokens: 1024,
+        messages: [{ role: 'system', content: systemPrompt }, ...messages],
+      })
+      resposta = r.choices[0].message.content
+
+    } else if (aiProvider.name === 'gemini') {
+      const model = aiProvider.client.getGenerativeModel({ model: 'gemini-1.5-flash' })
+      const chat = model.startChat({
+        history: messages.slice(0, -1).map(m => ({
+          role: m.role === 'assistant' ? 'model' : 'user',
+          parts: [{ text: m.content }],
+        })),
+        systemInstruction: systemPrompt,
+      })
+      const r = await chat.sendMessage(pergunta)
+      resposta = r.response.text()
+    }
+
+    return res.json({ resposta, provedor: aiProvider.name })
+  } catch (err) {
+    console.error('ia/chat erro:', err.message)
+    return res.status(500).json({ error: 'Erro interno ao processar a pergunta.' })
+  }
+})
 
 // Iniciar servidor
 app.listen(PORT, () => {
