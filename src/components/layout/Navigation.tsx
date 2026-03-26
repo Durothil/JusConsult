@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { listarAlertas } from '@/services/escritorio.service'
 import { listarDiligencias } from '@/services/diligencia.service'
@@ -30,18 +30,18 @@ const Navigation: React.FC = () => {
     return () => clearInterval(interval)
   }, [user])
 
-  const navLink = (to: string, label: React.ReactNode) => (
+  const navLink = useCallback((to: string, label: React.ReactNode) => (
     <Link
       to={to}
       className={`py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-1.5 ${
-        isActive(to)
+        location.pathname === to
           ? 'border-blue-600 text-blue-600'
           : 'border-transparent text-gray-600 hover:text-gray-900 hover:border-gray-300'
       }`}
     >
       {label}
     </Link>
-  )
+  ), [location.pathname])
 
   return (
     <nav className="bg-gray-50 border-b border-gray-200">
