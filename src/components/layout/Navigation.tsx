@@ -73,8 +73,6 @@ const Navigation: React.FC = () => {
             )}
             {navLink('/dashboard-operacional', '📊 Dashboard')}
             {navLink('/dashboard-tempos', '⏱ Tempos')}
-            {navLink('/search-cpf', 'Buscar por CPF/CNPJ')}
-            {navLink('/precedents', 'Precedentes')}
           </div>
           <div className="flex items-center gap-3 py-2">
             <span className="text-xs text-gray-500 hidden sm:block">{user?.email}</span>
