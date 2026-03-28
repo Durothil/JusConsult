@@ -24,7 +24,7 @@ export default {
         warning: '#d97706',
       },
       fontFamily: {
-        sans: ['Geist', '-apple-system', 'BlinkMacSystemFont', 'sans-serif'],
+        sans: ['Inter', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'sans-serif'],
       },
     },
   },

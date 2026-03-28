@@ -13,6 +13,9 @@ type ConfigState = {
   chatwootApiToken: string
   chatwootEnabled: string
   chatwootMovementTypes: string
+  asaasEnvironment: string
+  asaasApiKey: string
+  asaasWebhookToken: string
 }
 
 type TestState = {
@@ -22,11 +25,11 @@ type TestState = {
 }
 
 const MOVEMENT_OPTIONS = [
-  { key: 'sentenca', label: 'Sentenca e acordao' },
-  { key: 'decisao', label: 'Decisao e despacho' },
-  { key: 'audiencia', label: 'Audiencia e pericia' },
-  { key: 'intimacao', label: 'Intimacao e expedicao' },
-  { key: 'pagamento', label: 'Pagamento, RPV e precatorio' },
+  { key: 'sentenca', label: 'Sentença e acórdão' },
+  { key: 'decisao', label: 'Decisão e despacho' },
+  { key: 'audiencia', label: 'Audiência e perícia' },
+  { key: 'intimacao', label: 'Intimação e expedição' },
+  { key: 'pagamento', label: 'Pagamento, RPV e precatório' },
   { key: 'encerramento', label: 'Arquivamento e baixa' },
 ] as const
 
@@ -42,12 +45,15 @@ const EMPTY_STATE: ConfigState = {
   chatwootApiToken: '',
   chatwootEnabled: 'true',
   chatwootMovementTypes: DEFAULT_MOVEMENT_TYPES,
+  asaasEnvironment: 'sandbox',
+  asaasApiKey: '',
+  asaasWebhookToken: '',
 }
 
 const EMPTY_TEST: TestState = {
   nome: '',
   whatsapp: '',
-  mensagem: 'Esta e uma mensagem de teste do JusFlow via Chatwoot.',
+  mensagem: 'Esta é uma mensagem de teste do JusFlow via Chatwoot.',
 }
 
 function normalizeWhatsappPreview(value: string) {
@@ -97,9 +103,12 @@ export default function Configuracoes() {
         chatwootApiToken: loaded.chatwootApiToken || '',
         chatwootEnabled: loaded.chatwootEnabled || 'true',
         chatwootMovementTypes: loaded.chatwootMovementTypes || DEFAULT_MOVEMENT_TYPES,
+        asaasEnvironment: loaded.asaasEnvironment || 'sandbox',
+        asaasApiKey: loaded.asaasApiKey || '',
+        asaasWebhookToken: loaded.asaasWebhookToken || '',
       })
     } catch {
-      setError('Erro ao carregar configuracoes')
+      setError('Erro ao carregar configurações')
     } finally {
       setLoading(false)
     }
@@ -131,7 +140,7 @@ export default function Configuracoes() {
       setSaved(true)
       setTimeout(() => setSaved(false), 3000)
     } catch {
-      setError('Erro ao salvar configuracoes')
+      setError('Erro ao salvar configurações')
     } finally {
       setSaving(false)
     }
@@ -141,12 +150,13 @@ export default function Configuracoes() {
     const fallbackMap: Partial<Record<keyof ConfigState, string>> = {
       chatwootEnabled: 'true',
       chatwootMovementTypes: DEFAULT_MOVEMENT_TYPES,
+      asaasEnvironment: 'sandbox',
     }
     try {
       setSettings(prev => ({ ...prev, [key]: fallbackMap[key] ?? '' }))
       await deleteToken(key)
     } catch {
-      setError('Erro ao limpar configuracao')
+      setError('Erro ao limpar configuração')
     }
   }
 
@@ -171,7 +181,7 @@ export default function Configuracoes() {
       <div className="flex items-center justify-center min-h-screen">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-gray-600">Carregando configuracoes...</p>
+          <p className="text-gray-600">Carregando configurações...</p>
         </div>
       </div>
     )
@@ -182,8 +192,8 @@ export default function Configuracoes() {
       <div className="max-w-3xl mx-auto">
         <div className="bg-white shadow-lg rounded-lg overflow-hidden">
           <div className="bg-gradient-to-r from-blue-600 to-blue-800 px-6 py-8">
-            <h1 className="text-3xl font-bold text-white">Configuracoes</h1>
-            <p className="text-blue-100 mt-2">Tokens de IA e integracao com Chatwoot</p>
+            <h1 className="text-3xl font-bold text-white">Configurações</h1>
+            <p className="text-blue-100 mt-2">Tokens de IA, Chatwoot e gateway financeiro</p>
           </div>
 
           <div className="p-6 sm:p-8 space-y-8">
@@ -196,7 +206,7 @@ export default function Configuracoes() {
             {saved && (
               <div className="p-4 bg-green-50 border border-green-200 rounded-lg text-green-700 flex items-center gap-2">
                 <Check size={20} />
-                Configuracoes salvas com sucesso!
+                Configurações salvas com sucesso!
               </div>
             )}
 
@@ -210,7 +220,7 @@ export default function Configuracoes() {
               <div>
                 <h2 className="text-xl font-semibold text-gray-900">IA</h2>
                 <p className="text-sm text-gray-600 mt-1">
-                  Usada para explicar a movimentacao do processo em linguagem simples antes do envio ao cliente.
+                  Usada para explicar a movimentação do processo em linguagem simples antes do envio ao cliente.
                 </p>
               </div>
 
@@ -245,14 +255,66 @@ export default function Configuracoes() {
 
             <section className="space-y-4">
               <div>
-                <h2 className="text-xl font-semibold text-gray-900">Chatwoot</h2>
+                <h2 className="text-xl font-semibold text-gray-900">Asaas</h2>
                 <p className="text-sm text-gray-600 mt-1">
-                  O sistema cria ou reaproveita o contato, abre conversa no inbox de API e envia atualizacoes importantes do processo.
+                  Configuração do gateway financeiro para emissão de cobranças e recebimento de webhooks.
                 </p>
               </div>
 
               <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
-                <label className="block text-sm font-medium text-gray-900 mb-2">Envio automatico</label>
+                <label className="block text-sm font-medium text-gray-900 mb-2">Ambiente</label>
+                <select
+                  value={settings.asaasEnvironment}
+                  onChange={e => handleChange('asaasEnvironment', e.target.value)}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="sandbox">Sandbox</option>
+                  <option value="production">Produção</option>
+                </select>
+              </div>
+
+              {[
+                ['asaasApiKey', 'API Key do Asaas', '$aact_...'],
+                ['asaasWebhookToken', 'Token de validação do webhook', 'token-seguro-para-validar-callback'],
+              ].map(([key, label, placeholder]) => (
+                <div key={key} className="bg-gray-50 p-4 rounded-lg border border-gray-200">
+                  <label className="block text-sm font-medium text-gray-900 mb-2">{label}</label>
+                  <div className="flex gap-2">
+                    <input
+                      type="password"
+                      value={settings[key as keyof ConfigState]}
+                      onChange={e => handleChange(key as keyof ConfigState, e.target.value)}
+                      placeholder={placeholder}
+                      className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                    {settings[key as keyof ConfigState] && (
+                      <button
+                        onClick={() => handleClear(key as keyof ConfigState)}
+                        className="px-3 py-2 text-red-600 hover:bg-red-50 rounded-lg"
+                        title="Limpar"
+                      >
+                        <X size={20} />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+
+              <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-800">
+                Use Sandbox durante os testes. O backend envia as requisições para <code>api-sandbox.asaas.com/v3</code> ou <code>api.asaas.com/v3</code> conforme o ambiente salvo.
+              </div>
+            </section>
+
+            <section className="space-y-4">
+              <div>
+                <h2 className="text-xl font-semibold text-gray-900">Chatwoot</h2>
+                <p className="text-sm text-gray-600 mt-1">
+                  O sistema cria ou reaproveita o contato, abre conversa no inbox de API e envia atualizações importantes do processo.
+                </p>
+              </div>
+
+              <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
+                <label className="block text-sm font-medium text-gray-900 mb-2">Envio automático</label>
                 <select
                   value={settings.chatwootEnabled}
                   onChange={e => handleChange('chatwootEnabled', e.target.value)}
@@ -294,7 +356,7 @@ export default function Configuracoes() {
 
               <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
                 <label className="block text-sm font-medium text-gray-900 mb-3">
-                  Tipos de movimentacao que devem gerar mensagem ao cliente
+                  Tipos de movimentação que devem gerar mensagem ao cliente
                 </label>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {MOVEMENT_OPTIONS.map(option => (
@@ -320,7 +382,7 @@ export default function Configuracoes() {
               <div>
                 <h2 className="text-xl font-semibold text-gray-900">Teste de envio</h2>
                 <p className="text-sm text-gray-600 mt-1">
-                  Envia uma mensagem manual pelo Chatwoot para validar a integracao antes de liberar o disparo automatico.
+                  Envia uma mensagem manual pelo Chatwoot para validar a integração antes de liberar o disparo automático.
                 </p>
               </div>
 
@@ -366,7 +428,7 @@ export default function Configuracoes() {
                 disabled={saving}
                 className="flex-1 px-6 py-3 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 disabled:bg-gray-400 transition-colors"
               >
-                {saving ? 'Salvando...' : 'Salvar configuracoes'}
+                {saving ? 'Salvando...' : 'Salvar configurações'}
               </button>
               <button
                 onClick={loadSettings}

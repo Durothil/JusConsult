@@ -4,7 +4,6 @@ import { Link, useLocation } from 'react-router-dom'
 import { apiClient } from '@/services/api'
 import { useAuth } from '@/contexts/AuthContext'
 
-// Ícones SVG inline — 15x15px
 const Icons = {
   search: (
     <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
@@ -45,6 +44,11 @@ const Icons = {
   bars: (
     <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
       <rect x="2" y="9" width="2.5" height="4" rx="0.5"/><rect x="6.25" y="6" width="2.5" height="7" rx="0.5"/><rect x="10.5" y="3" width="2.5" height="10" rx="0.5"/>
+    </svg>
+  ),
+  money: (
+    <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="1.5" y="3" width="12" height="9" rx="1.5"/><circle cx="7.5" cy="7.5" r="1.5"/><path d="M4 7.5h0M11 7.5h0"/>
     </svg>
   ),
   ai: (
@@ -118,7 +122,6 @@ const Navigation: React.FC = () => {
 
   return (
     <aside className="w-[220px] shrink-0 bg-surface border-r border-border flex flex-col min-h-screen">
-      {/* Logo */}
       <div className="flex items-center gap-2.5 px-4 py-4 border-b border-border-subtle">
         <div className="w-7 h-7 bg-primary rounded-md flex items-center justify-center shrink-0">
           <span className="text-white text-xs font-bold">J</span>
@@ -129,7 +132,6 @@ const Navigation: React.FC = () => {
         </div>
       </div>
 
-      {/* Nav */}
       <nav className="flex-1 px-2 py-2 flex flex-col gap-0.5 overflow-y-auto">
         {sectionLabel('Consulta')}
         {navItem('/', Icons.search, 'Buscar Processo')}
@@ -140,6 +142,7 @@ const Navigation: React.FC = () => {
         {navItem('/meus-processos', Icons.folder, 'Meus Processos', alertasCount)}
         {navItem('/diligencias', Icons.clock, 'Diligências', urgentesCount)}
         {navItem('/clientes', Icons.users, 'Clientes')}
+        {navItem('/financeiro', Icons.money, 'Financeiro')}
 
         {sectionLabel('Analytics')}
         {navItem('/dashboard-operacional', Icons.chart, 'Dashboard')}
@@ -147,7 +150,6 @@ const Navigation: React.FC = () => {
         {navItem('/ia', Icons.ai, 'Assistente IA')}
       </nav>
 
-      {/* Footer */}
       <div className="border-t border-border-subtle px-2 py-2">
         {navItem('/configuracoes', Icons.settings, 'Configurações')}
         <div className="flex items-center gap-2.5 px-2.5 py-2 mt-1">

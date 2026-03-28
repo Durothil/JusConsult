@@ -2273,6 +2273,199 @@ app.delete('/api/diligencias/:id', async (req, res) => {
   }
 });
 
+// POST /api/financeiro/clientes/sync
+app.post('/api/financeiro/clientes/sync', generalLimiter, async (req, res) => {
+  try {
+    const { clienteId } = req.body || {}
+    if (!clienteId) return res.status(400).json({ error: 'clienteId e obrigatorio.' })
+    const synced = await syncClienteAsaasById(clienteId)
+    return res.json(synced)
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    const status = typeof err?.statusCode === 'number' ? err.statusCode : 500
+    console.error('POST /api/financeiro/clientes/sync:', msg)
+    return res.status(status).json({ error: msg })
+  }
+})
+
+// GET /api/financeiro/cobrancas
+app.get('/api/financeiro/cobrancas', generalLimiter, async (req, res) => {
+  if (!supabase) return res.status(503).json({ error: 'Supabase nao configurado' })
+  try {
+    let query = supabase
+      .from('financeiro_cobrancas')
+      .select('*, clientes(*)')
+      .order('created_at', { ascending: false })
+
+    if (req.query.clienteId) query = query.eq('cliente_id', req.query.clienteId)
+    if (req.query.status) query = query.eq('status', req.query.status)
+
+    const { data, error } = await query
+    if (error) throw error
+    return res.json((data || []).map(financeiroCobrancaToCamel))
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    console.error('GET /api/financeiro/cobrancas:', msg)
+    return res.status(500).json({ error: 'Erro interno ao processar operacao.' })
+  }
+})
+
+// GET /api/financeiro/cobrancas/:id
+app.get('/api/financeiro/cobrancas/:id', generalLimiter, async (req, res) => {
+  if (!supabase) return res.status(503).json({ error: 'Supabase nao configurado' })
+  try {
+    const { data, error } = await supabase
+      .from('financeiro_cobrancas')
+      .select('*, clientes(*)')
+      .eq('id', req.params.id)
+      .single()
+
+    if (error) {
+      if (error.code === 'PGRST116') return res.status(404).json({ error: 'Cobranca nao encontrada.' })
+      throw error
+    }
+
+    return res.json(financeiroCobrancaToCamel(data))
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    console.error('GET /api/financeiro/cobrancas/:id:', msg)
+    return res.status(500).json({ error: 'Erro interno ao processar operacao.' })
+  }
+})
+
+// POST /api/financeiro/cobrancas
+app.post('/api/financeiro/cobrancas', generalLimiter, async (req, res) => {
+  if (!supabase) return res.status(503).json({ error: 'Supabase nao configurado' })
+  try {
+    const { clienteId, processoCnj, descricao, valor, billingType, dueDate } = req.body || {}
+    if (!clienteId || !descricao?.trim() || !valor || !dueDate) {
+      return res.status(400).json({ error: 'clienteId, descricao, valor e dueDate sao obrigatorios.' })
+    }
+
+    const amount = Number(valor)
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return res.status(400).json({ error: 'Valor invalido para cobranca.' })
+    }
+
+    const mapping = await syncClienteAsaasById(clienteId)
+    const config = await resolveAsaasConfig()
+
+    const charge = await asaasRequest(config, '/payments', {
+      method: 'POST',
+      body: {
+        customer: mapping.gatewayCustomerId,
+        billingType: billingType || 'PIX',
+        value: amount,
+        dueDate,
+        description: descricao.trim(),
+        externalReference: processoCnj || clienteId,
+      },
+    })
+
+    const payload = {
+      cliente_id: clienteId,
+      processo_cnj: processoCnj || null,
+      gateway: 'asaas',
+      gateway_charge_id: charge.id,
+      gateway_customer_id: mapping.gatewayCustomerId,
+      descricao: descricao.trim(),
+      valor: amount,
+      billing_type: charge.billingType || billingType || 'PIX',
+      status: charge.status || 'PENDING',
+      due_date: charge.dueDate || dueDate,
+      invoice_url: charge.invoiceUrl || null,
+      bank_slip_url: charge.bankSlipUrl || null,
+      pix_qr_code: charge.pixTransaction?.qrCode?.encodedImage || null,
+      pix_copy_paste: charge.pixTransaction?.payload || null,
+      external_reference: charge.externalReference || processoCnj || clienteId,
+      last_payload_json: charge,
+      paid_at: charge.clientPaymentDate || null,
+    }
+
+    const { data, error } = await supabase
+      .from('financeiro_cobrancas')
+      .insert(payload)
+      .select('*, clientes(*)')
+      .single()
+
+    if (error) throw error
+    return res.status(201).json(financeiroCobrancaToCamel(data))
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    const status = typeof err?.statusCode === 'number' ? err.statusCode : 500
+    console.error('POST /api/financeiro/cobrancas:', msg)
+    return res.status(status).json({ error: msg })
+  }
+})
+
+// POST /api/financeiro/cobrancas/:id/sync
+app.post('/api/financeiro/cobrancas/:id/sync', generalLimiter, async (req, res) => {
+  try {
+    const cobranca = await syncFinanceiroCobrancaById(req.params.id)
+    return res.json(cobranca)
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    const status = typeof err?.statusCode === 'number' ? err.statusCode : 500
+    console.error('POST /api/financeiro/cobrancas/:id/sync:', msg)
+    return res.status(status).json({ error: msg })
+  }
+})
+
+// POST /api/financeiro/webhooks/asaas
+app.post('/api/financeiro/webhooks/asaas', async (req, res) => {
+  if (!supabase) return res.status(503).json({ error: 'Supabase nao configurado' })
+  try {
+    const config = await resolveAsaasConfig()
+    const headerToken = req.headers['asaas-access-token']
+    if (config.webhookToken && headerToken !== config.webhookToken) {
+      return res.status(401).json({ error: 'Webhook Asaas nao autorizado.' })
+    }
+
+    const eventType = req.body?.event || 'UNKNOWN'
+    const payment = req.body?.payment || {}
+    const chargeId = payment.id || null
+
+    const { error: eventError } = await supabase
+      .from('financeiro_eventos')
+      .insert({
+        gateway: 'asaas',
+        event_type: eventType,
+        gateway_object_id: chargeId,
+        payload_json: req.body || {},
+      })
+
+    if (eventError) throw eventError
+
+    if (chargeId) {
+      const updates = {
+        status: payment.status || 'PENDING',
+        invoice_url: payment.invoiceUrl || null,
+        bank_slip_url: payment.bankSlipUrl || null,
+        pix_qr_code: payment.pixTransaction?.qrCode?.encodedImage || null,
+        pix_copy_paste: payment.pixTransaction?.payload || null,
+        paid_at: payment.clientPaymentDate || payment.confirmedDate || null,
+        due_date: payment.dueDate || null,
+        last_payload_json: req.body || {},
+        updated_at: new Date().toISOString(),
+      }
+
+      const { error: chargeError } = await supabase
+        .from('financeiro_cobrancas')
+        .update(updates)
+        .eq('gateway', 'asaas')
+        .eq('gateway_charge_id', chargeId)
+
+      if (chargeError) throw chargeError
+    }
+
+    return res.status(204).send()
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    console.error('POST /api/financeiro/webhooks/asaas:', msg)
+    return res.status(500).json({ error: 'Erro ao processar webhook do Asaas.' })
+  }
+})
+
 // Error handler
 app.use((err, req, res, next) => {
   console.error('Erro não tratado:', err);
@@ -2328,6 +2521,207 @@ async function getSettingValue(key) {
     .eq('key', key)
     .maybeSingle()
   return data?.value ?? null
+}
+
+async function resolveAsaasConfig() {
+  const [environment, apiKey, webhookToken] = await Promise.all([
+    getSettingValue('asaasEnvironment'),
+    getSettingValue('asaasApiKey'),
+    getSettingValue('asaasWebhookToken'),
+  ])
+
+  const envName = environment === 'production' ? 'production' : 'sandbox'
+  const baseUrl = envName === 'production'
+    ? 'https://api.asaas.com/v3'
+    : 'https://api-sandbox.asaas.com/v3'
+
+  return {
+    environment: envName,
+    apiKey: apiKey || null,
+    webhookToken: webhookToken || null,
+    baseUrl,
+  }
+}
+
+async function asaasRequest(config, path, options = {}) {
+  if (!config?.apiKey) {
+    const err = new Error('Asaas nao configurado. Preencha ambiente e API key nas configuracoes.')
+    err.statusCode = 503
+    throw err
+  }
+
+  const response = await fetch(`${config.baseUrl}${path}`, {
+    method: options.method || 'GET',
+    headers: {
+      'Content-Type': 'application/json',
+      'User-Agent': 'JusFlow/1.0 (financeiro)',
+      'access_token': config.apiKey,
+      ...(options.headers || {}),
+    },
+    body: options.body ? JSON.stringify(options.body) : undefined,
+  })
+
+  const raw = await response.text()
+  const parsed = raw ? (() => {
+    try { return JSON.parse(raw) } catch { return raw }
+  })() : null
+
+  if (!response.ok) {
+    const details = parsed?.errors?.[0]?.description || parsed?.message || parsed || `HTTP ${response.status}`
+    const err = new Error(typeof details === 'string' ? details : JSON.stringify(details))
+    err.statusCode = response.status
+    err.payload = parsed
+    throw err
+  }
+
+  return parsed
+}
+
+function financeiroClienteGatewayToCamel(row) {
+  return {
+    id: row.id,
+    clienteId: row.cliente_id,
+    gateway: row.gateway,
+    gatewayCustomerId: row.gateway_customer_id,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }
+}
+
+function financeiroCobrancaToCamel(row) {
+  return {
+    id: row.id,
+    clienteId: row.cliente_id,
+    processoCnj: row.processo_cnj || undefined,
+    gateway: row.gateway,
+    gatewayChargeId: row.gateway_charge_id,
+    gatewayCustomerId: row.gateway_customer_id || undefined,
+    descricao: row.descricao,
+    valor: Number(row.valor || 0),
+    billingType: row.billing_type,
+    status: row.status,
+    dueDate: row.due_date,
+    invoiceUrl: row.invoice_url || undefined,
+    bankSlipUrl: row.bank_slip_url || undefined,
+    pixQrCode: row.pix_qr_code || undefined,
+    pixCopyPaste: row.pix_copy_paste || undefined,
+    externalReference: row.external_reference || undefined,
+    paidAt: row.paid_at || undefined,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    cliente: row.clientes ? clienteToCamel(row.clientes) : undefined,
+  }
+}
+
+async function syncFinanceiroCobrancaById(id) {
+  if (!supabase) {
+    const err = new Error('Supabase nao configurado')
+    err.statusCode = 503
+    throw err
+  }
+
+  const current = await supabase
+    .from('financeiro_cobrancas')
+    .select('*, clientes(*)')
+    .eq('id', id)
+    .single()
+
+  if (current.error || !current.data) {
+    const err = new Error('Cobranca nao encontrada.')
+    err.statusCode = 404
+    throw err
+  }
+
+  const config = await resolveAsaasConfig()
+  const charge = await asaasRequest(config, `/payments/${current.data.gateway_charge_id}`)
+
+  const updates = {
+    gateway_customer_id: charge.customer || current.data.gateway_customer_id || null,
+    billing_type: charge.billingType || current.data.billing_type,
+    status: charge.status || current.data.status,
+    due_date: charge.dueDate || current.data.due_date,
+    invoice_url: charge.invoiceUrl || current.data.invoice_url || null,
+    bank_slip_url: charge.bankSlipUrl || current.data.bank_slip_url || null,
+    pix_qr_code: current.data.pix_qr_code || null,
+    pix_copy_paste: current.data.pix_copy_paste || null,
+    external_reference: charge.externalReference || current.data.external_reference || null,
+    paid_at: charge.clientPaymentDate || charge.confirmedDate || current.data.paid_at || null,
+    last_payload_json: charge,
+    updated_at: new Date().toISOString(),
+  }
+
+  const updated = await supabase
+    .from('financeiro_cobrancas')
+    .update(updates)
+    .eq('id', id)
+    .select('*, clientes(*)')
+    .single()
+
+  if (updated.error) throw new Error(updated.error.message)
+  return financeiroCobrancaToCamel(updated.data)
+}
+
+async function syncClienteAsaasById(clienteId) {
+  if (!supabase) {
+    const err = new Error('Supabase nao configurado')
+    err.statusCode = 503
+    throw err
+  }
+
+  const existingResult = await supabase
+    .from('financeiro_clientes_gateway')
+    .select('*')
+    .eq('cliente_id', clienteId)
+    .eq('gateway', 'asaas')
+    .maybeSingle()
+
+  if (existingResult.error) {
+    throw new Error(existingResult.error.message)
+  }
+  if (existingResult.data) {
+    return financeiroClienteGatewayToCamel(existingResult.data)
+  }
+
+  const clienteResult = await supabase
+    .from('clientes')
+    .select('*')
+    .eq('id', clienteId)
+    .single()
+
+  if (clienteResult.error || !clienteResult.data) {
+    const err = new Error('Cliente nao encontrado para sincronizacao.')
+    err.statusCode = 404
+    throw err
+  }
+
+  const config = await resolveAsaasConfig()
+  const cliente = clienteResult.data
+  const customer = await asaasRequest(config, '/customers', {
+    method: 'POST',
+    body: {
+      name: cliente.nome,
+      cpfCnpj: cliente.cpf_cnpj || undefined,
+      email: cliente.email || undefined,
+      mobilePhone: cliente.whatsapp || undefined,
+      notificationDisabled: false,
+    },
+  })
+
+  const gatewayResult = await supabase
+    .from('financeiro_clientes_gateway')
+    .insert({
+      cliente_id: cliente.id,
+      gateway: 'asaas',
+      gateway_customer_id: customer.id,
+    })
+    .select()
+    .single()
+
+  if (gatewayResult.error) {
+    throw new Error(gatewayResult.error.message)
+  }
+
+  return financeiroClienteGatewayToCamel(gatewayResult.data)
 }
 
 async function resolveChatwootConfig() {
@@ -2847,9 +3241,10 @@ async function createMovementApprovalDraft({ registro, cnj, movimento, manual = 
     throw new Error('Essa movimentacao nao esta habilitada para notificacao ao cliente.')
   }
 
+  // Usa hash_unico como fingerprint estável. Nunca usa movimento.id pois
+  // parseMovimentos gera IDs sintéticos (mov-1, mov-2) que se repetem a cada fetch.
   const sourceReferenceBase = movimento?.hash_unico ||
-    movimento?.id ||
-    `${movimento?.data || ''}-${(movimento?.descricao || '').slice(0, 80)}`
+    `${movimento?.data || ''}-${(movimento?.tipo || '')}-${(movimento?.descricao || '').slice(0, 80)}`
 
   const draftMessage = await explainMovementForClient({
     clienteNome: cliente.nome,
@@ -3557,9 +3952,10 @@ app.post('/api/settings', generalLimiter, async (req, res) => {
 })
 
 const SETTINGS_ALLOWLIST = new Set([
-  'anthropic_token', 'openai_token', 'gemini_token',
-  'chatwoot_url', 'chatwoot_token', 'chatwoot_inbox_id',
-  'chatwoot_account_id', 'chatwoot_enabled', 'chatwoot_auto_send',
+  'anthropicToken', 'openaiToken', 'geminiToken',
+  'chatwootBaseUrl', 'chatwootApiToken', 'chatwootInboxId',
+  'chatwootAccountId', 'chatwootEnabled', 'chatwootMovementTypes',
+  'asaasEnvironment', 'asaasApiKey', 'asaasWebhookToken',
 ])
 
 // GET /api/settings/:key — obter configuração
@@ -3620,4 +4016,10 @@ function gracefulShutdown(signal) {
 
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('SIGINT',  () => gracefulShutdown('SIGINT'));
+
+
+
+
+
+
 
