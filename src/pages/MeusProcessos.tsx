@@ -229,10 +229,6 @@ export default function MeusProcessos() {
     [processos]
   )
 
-  const porConhecimento = useMemo(
-    () => processos.filter(p => (p.faseProcessual || 'CONHECIMENTO') === 'CONHECIMENTO').length,
-    [processos]
-  )
 
   return (
     <div className="p-6 space-y-6">
@@ -282,11 +278,10 @@ export default function MeusProcessos() {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
         <Card><CardContent className="py-5 text-center"><p className="text-3xl font-bold text-gray-800">{processos.length}</p><p className="mt-2 text-xs uppercase tracking-wide text-gray-500">Processos</p></CardContent></Card>
         <Card><CardContent className="py-5 text-center"><p className="text-3xl font-bold text-blue-700">{processosMonitorados}</p><p className="mt-2 text-xs uppercase tracking-wide text-gray-500">Monitorados</p></CardContent></Card>
         <Card><CardContent className="py-5 text-center"><p className="text-3xl font-bold text-green-700">{porPoloAtivo}</p><p className="mt-2 text-xs uppercase tracking-wide text-gray-500">Polo ativo</p></CardContent></Card>
-        <Card><CardContent className="py-5 text-center"><p className="text-3xl font-bold text-cyan-700">{porConhecimento}</p><p className="mt-2 text-xs uppercase tracking-wide text-gray-500">Conhecimento</p></CardContent></Card>
       </div>
 
       <Card>

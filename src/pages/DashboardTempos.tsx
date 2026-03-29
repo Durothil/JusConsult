@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react'
+﻿import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   ResponsiveContainer,
@@ -18,31 +18,26 @@ import { Spinner } from '@/components/common/Loading'
 import Empty from '@/components/common/Empty'
 import { listarMetricasTempo } from '@/services/escritorio.service'
 import { apiClient } from '@/services/api'
-import type { MetricasTempo } from '@/types/escritorio'
+import type { MetricasTempo, ProcessoTempoResumo } from '@/types/escritorio'
 
 const FASE_COLOR: Record<string, string> = {
-  'Conhecimento': '#3b82f6',
-  'Sentenciado': '#f59e0b',
+  Conhecimento: '#3b82f6',
+  Sentenciado: '#f59e0b',
   'Liquidação / Execução': '#10b981',
+  'Aguardando RPV': '#e11d48',
 }
 
 type Periodo = '6m' | '1a' | 'tudo'
+type FiltroResumo = 'todos' | 'sentenca' | 'liquidacao' | 'conhecimento' | 'rpv'
 
 const PERIODO_LABEL: Record<Periodo, string> = {
-  '6m': 'Ultimos 6 meses',
-  '1a': 'Ultimo ano',
-  tudo: 'Todo periodo',
+  '6m': 'Últimos 6 meses',
+  '1a': 'Último ano',
+  tudo: 'Todo período',
 }
 
-const DIST_SENTENCA_KEY = 'Dist. -> Sentenca'
-const SENTENCA_LIQUIDACAO_KEY = 'Sentenca -> Liquidacao'
-
-const SUMMARY_CARDS = (r: MetricasTempo['resumo']) => [
-  { label: 'Processos', value: String(r.totalProcessos), color: 'text-gray-800' },
-  { label: 'Com Sentenca', value: String(r.processosComSentenca), color: 'text-blue-600' },
-  { label: 'Em Liquidacao', value: String(r.processosEmLiquidacao), color: 'text-green-600' },
-  { label: 'Media Geral', value: formatDias(r.mediaGeralDias), color: 'text-purple-600' },
-]
+const DIST_SENTENCA_KEY = 'Dist. -> Sentença'
+const SENTENCA_LIQUIDACAO_KEY = 'Sentença -> Liquidação'
 
 function formatDias(days: number | null | undefined): string {
   if (days == null) return '-'
@@ -61,6 +56,51 @@ function formatChartLabel(value: unknown) {
   return typeof value === 'number' ? formatDias(value) : ''
 }
 
+function formatDate(value: string | null | undefined) {
+  if (!value) return '-'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return '-'
+  return date.toLocaleDateString('pt-BR')
+}
+
+function filtrarProcessos(processos: ProcessoTempoResumo[], filtro: FiltroResumo) {
+  switch (filtro) {
+    case 'sentenca':
+      return processos.filter(processo => processo.temSentenca)
+    case 'liquidacao':
+      return processos.filter(processo => processo.fase === 'Liquidação / Execução')
+    case 'conhecimento':
+      return processos.filter(processo => processo.fase === 'Conhecimento')
+    case 'rpv':
+      return processos.filter(processo => processo.aguardandoRpv)
+    default:
+      return processos
+  }
+}
+
+const FILTER_META: Record<FiltroResumo, { titulo: string; descricao: string }> = {
+  todos: {
+    titulo: 'Todos os processos monitorados',
+    descricao: 'Lista completa dos processos considerados nas métricas atuais.',
+  },
+  sentenca: {
+    titulo: 'Processos com sentença',
+    descricao: 'Processos que já tiveram sentença ou acórdão identificado nas movimentações.',
+  },
+  liquidacao: {
+    titulo: 'Processos em liquidação',
+    descricao: 'Processos em fase de liquidação, execução ou cumprimento de sentença.',
+  },
+  conhecimento: {
+    titulo: 'Processos em conhecimento',
+    descricao: 'Processos ainda sem sentença ou sem avanço para execução identificado.',
+  },
+  rpv: {
+    titulo: 'Processos aguardando RPV',
+    descricao: 'Processos com indício de RPV/requisitório sem baixa posterior de pagamento.',
+  },
+}
+
 const DashboardTempos: React.FC = () => {
   const navigate = useNavigate()
   const [periodo, setPeriodo] = useState<Periodo>('tudo')
@@ -69,6 +109,7 @@ const DashboardTempos: React.FC = () => {
   const [erro, setErro] = useState<string | null>(null)
   const [sincronizando, setSincronizando] = useState(false)
   const [msgSync, setMsgSync] = useState<string | null>(null)
+  const [filtroResumo, setFiltroResumo] = useState<FiltroResumo>('todos')
 
   const carregar = useCallback(async (p: Periodo) => {
     setLoading(true)
@@ -76,7 +117,7 @@ const DashboardTempos: React.FC = () => {
     try {
       setDados(await listarMetricasTempo(p))
     } catch {
-      setErro('Nao foi possivel carregar as metricas. Verifique se o backend esta rodando.')
+      setErro('Não foi possível carregar as métricas. Verifique se o backend está rodando.')
     } finally {
       setLoading(false)
     }
@@ -104,48 +145,61 @@ const DashboardTempos: React.FC = () => {
     carregar(periodo)
   }, [periodo, carregar])
 
+  useEffect(() => {
+    setFiltroResumo('todos')
+  }, [periodo])
+
   const chartData = (dados?.porTribunal ?? []).map(t => ({
     tribunal: t.tribunal,
     [DIST_SENTENCA_KEY]: t.mediaDistribuicaoSentenca,
     [SENTENCA_LIQUIDACAO_KEY]: t.mediaSentencaLiquidacao,
   }))
 
+  const processosFiltrados = useMemo(
+    () => filtrarProcessos(dados?.processos ?? [], filtroResumo),
+    [dados?.processos, filtroResumo]
+  )
+
+  const summaryCards = dados ? [
+    { key: 'todos' as const, label: 'Processos', value: String(dados.resumo.totalProcessos), color: 'text-gray-800', active: filtroResumo === 'todos' },
+    { key: 'sentenca' as const, label: 'Com Sentença', value: String(dados.resumo.processosComSentenca), color: 'text-blue-600', active: filtroResumo === 'sentenca' },
+    { key: 'liquidacao' as const, label: 'Em Liquidação', value: String(dados.resumo.processosEmLiquidacao), color: 'text-green-600', active: filtroResumo === 'liquidacao' },
+    { key: 'conhecimento' as const, label: 'Em Conhecimento', value: String(dados.resumo.processosEmConhecimento), color: 'text-sky-600', active: filtroResumo === 'conhecimento' },
+    { key: 'rpv' as const, label: 'Aguardando RPV', value: String(dados.resumo.processosAguardandoRpv), color: 'text-rose-600', active: filtroResumo === 'rpv' },
+  ] : []
+
+  const filtroAtual = FILTER_META[filtroResumo]
+
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="space-y-6 p-6">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Tempos Processuais</h1>
-          <p className="text-gray-500 text-sm mt-1">
-            Metricas calculadas a partir dos processos monitorados
+          <h1 className="text-3xl font-semibold text-gray-900">Tempos Processuais</h1>
+          <p className="mt-1 text-sm text-gray-500">
+            Métricas calculadas a partir dos processos monitorados pelo escritório.
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap gap-3">
           <select
             value={periodo}
             onChange={e => setPeriodo(e.target.value as Periodo)}
-            className="border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm text-gray-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
           >
             {(Object.entries(PERIODO_LABEL) as [Periodo, string][]).map(([v, l]) => (
               <option key={v} value={v}>{l}</option>
             ))}
           </select>
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={sincronizarAssuntos}
-            disabled={sincronizando}
-            title="Busca o assunto de todos os processos sem essa informação"
-          >
-            {sincronizando ? 'Sincronizando...' : 'Sincronizar Assuntos'}
+          <Button variant="secondary" onClick={sincronizarAssuntos} disabled={sincronizando}>
+            {sincronizando ? 'Sincronizando...' : 'Sincronizar assuntos'}
           </Button>
-          <Button variant="secondary" size="sm" onClick={() => navigate('/meus-processos')}>
-            Meus Processos
+          <Button variant="secondary" onClick={() => navigate('/meus-processos')}>
+            Meus processos
           </Button>
         </div>
       </div>
 
       {msgSync && (
-        <div className="text-sm text-green-700 bg-green-50 border border-green-200 rounded px-4 py-2">
+        <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">
           {msgSync}
         </div>
       )}
@@ -154,41 +208,113 @@ const DashboardTempos: React.FC = () => {
 
       {!loading && erro && (
         <Card>
-          <CardContent className="py-8 text-center text-red-600 text-sm">{erro}</CardContent>
+          <CardContent className="py-8 text-center text-sm text-red-600">{erro}</CardContent>
         </Card>
       )}
 
       {!loading && !erro && dados?.resumo.totalProcessos === 0 && (
         <Empty
           title="Nenhum processo monitorado"
-          description="Cadastre processos em Meus Processos para ver as metricas de tempo."
+          description="Cadastre processos em Meus Processos para ver as métricas de tempo."
           action={{ label: 'Ir para Meus Processos', onClick: () => navigate('/meus-processos') }}
         />
       )}
 
       {!loading && !erro && dados && dados.resumo.totalProcessos > 0 && (
         <>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            {SUMMARY_CARDS(dados.resumo).map(c => (
-              <Card key={c.label}>
-                <CardContent className="py-5 text-center">
-                  <p className={`text-3xl font-bold ${c.color}`}>{c.value}</p>
-                  <p className="text-xs text-gray-500 uppercase tracking-wide mt-2">{c.label}</p>
-                </CardContent>
-              </Card>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
+            {summaryCards.map(card => (
+              <button
+                key={card.key}
+                type="button"
+                onClick={() => setFiltroResumo(card.key)}
+                className="text-left"
+              >
+                <Card className={card.active ? 'border-blue-500 ring-2 ring-blue-100' : 'hover:border-gray-300 hover:shadow-md'}>
+                  <CardContent className="py-6 text-center">
+                    <div className={`text-3xl font-semibold ${card.color}`}>{card.value}</div>
+                    <div className="mt-2 text-xs font-medium uppercase tracking-[0.2em] text-gray-500">{card.label}</div>
+                    <div className="mt-3 text-xs text-blue-600">Clique para ver os processos</div>
+                  </CardContent>
+                </Card>
+              </button>
             ))}
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
-            <Card className="lg:col-span-3">
-              <CardContent>
-                <h2 className="font-semibold text-gray-900 mb-4">Tempo Medio por Tribunal</h2>
+          <Card>
+            <CardContent className="space-y-4">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                <div>
+                  <h2 className="text-xl font-semibold text-gray-900">{filtroAtual.titulo}</h2>
+                  <p className="text-sm text-gray-500">{filtroAtual.descricao}</p>
+                </div>
+                {filtroResumo !== 'todos' && (
+                  <Button variant="secondary" onClick={() => setFiltroResumo('todos')}>
+                    Limpar filtro
+                  </Button>
+                )}
+              </div>
+
+              {processosFiltrados.length === 0 ? (
+                <p className="py-6 text-center text-sm text-gray-400">Nenhum processo encontrado para este filtro.</p>
+              ) : (
+                <div className="overflow-hidden rounded-xl border border-gray-200">
+                  <div className="max-h-[420px] overflow-auto">
+                    <table className="min-w-full divide-y divide-gray-200 text-sm">
+                      <thead className="bg-gray-50 text-left text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">
+                        <tr>
+                          <th className="px-4 py-3">Cliente</th>
+                          <th className="px-4 py-3">CNJ</th>
+                          <th className="px-4 py-3">Fase</th>
+                          <th className="px-4 py-3">Tempo</th>
+                          <th className="px-4 py-3">Últ. mov.</th>
+                          <th className="px-4 py-3">Ação</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100 bg-white">
+                        {processosFiltrados.map(processo => (
+                          <tr key={`${processo.cnj}-${processo.fase}`} className="hover:bg-gray-50">
+                            <td className="px-4 py-3">
+                              <div className="font-medium text-gray-800">{processo.clienteNome}</div>
+                              <div className="text-xs text-gray-500">{processo.tribunal || 'Tribunal não informado'}</div>
+                            </td>
+                            <td className="px-4 py-3 font-mono text-xs text-gray-700">{processo.cnj}</td>
+                            <td className="px-4 py-3">
+                              <span
+                                className="inline-flex rounded-full px-2.5 py-1 text-xs font-medium text-white"
+                                style={{ backgroundColor: FASE_COLOR[processo.fase] || '#6b7280' }}
+                              >
+                                {processo.fase}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-gray-700">{formatDias(processo.tempoTotalDias)}</td>
+                            <td className="px-4 py-3 text-gray-700">{formatDate(processo.ultimaMovimentacaoData)}</td>
+                            <td className="px-4 py-3">
+                              <Button variant="secondary" size="sm" onClick={() => navigate(`/process/${encodeURIComponent(processo.cnj)}`)}>
+                                Abrir processo
+                              </Button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <div className="grid grid-cols-1 gap-6 xl:grid-cols-5">
+            <Card className="xl:col-span-3">
+              <CardContent className="space-y-4">
+                <div>
+                  <h2 className="text-xl font-semibold text-gray-900">Tempo médio por tribunal</h2>
+                  <p className="text-sm text-gray-500">Visão comparativa entre sentença e liquidação.</p>
+                </div>
                 {chartData.length === 0 ? (
-                  <p className="text-gray-400 text-sm text-center py-8">
-                    Sem movimentacoes cacheadas para o periodo selecionado.
-                  </p>
+                  <p className="py-8 text-center text-sm text-gray-400">Sem movimentações cacheadas para o período selecionado.</p>
                 ) : (
-                  <ResponsiveContainer width="100%" height={280}>
+                  <ResponsiveContainer width="100%" height={320}>
                     <BarChart data={chartData} margin={{ top: 20, right: 20, left: 10, bottom: 5 }}>
                       <CartesianGrid strokeDasharray="3 3" />
                       <XAxis dataKey="tribunal" tick={{ fontSize: 12 }} />
@@ -196,20 +322,10 @@ const DashboardTempos: React.FC = () => {
                       <Tooltip formatter={(v: unknown) => [typeof v === 'number' ? formatDias(v) : '-']} />
                       <Legend />
                       <Bar dataKey={DIST_SENTENCA_KEY} fill="#3b82f6">
-                        <LabelList
-                          dataKey={DIST_SENTENCA_KEY}
-                          position="top"
-                          formatter={formatChartLabel}
-                          style={{ fontSize: 12, fill: '#1f2937' }}
-                        />
+                        <LabelList dataKey={DIST_SENTENCA_KEY} position="top" formatter={formatChartLabel} style={{ fontSize: 12, fill: '#1f2937' }} />
                       </Bar>
                       <Bar dataKey={SENTENCA_LIQUIDACAO_KEY} fill="#10b981">
-                        <LabelList
-                          dataKey={SENTENCA_LIQUIDACAO_KEY}
-                          position="top"
-                          formatter={formatChartLabel}
-                          style={{ fontSize: 12, fill: '#1f2937' }}
-                        />
+                        <LabelList dataKey={SENTENCA_LIQUIDACAO_KEY} position="top" formatter={formatChartLabel} style={{ fontSize: 12, fill: '#1f2937' }} />
                       </Bar>
                     </BarChart>
                   </ResponsiveContainer>
@@ -217,31 +333,41 @@ const DashboardTempos: React.FC = () => {
               </CardContent>
             </Card>
 
-            <Card className="lg:col-span-2">
-              <CardContent>
-                <h2 className="font-semibold text-gray-900 mb-4">Por Fase Processual</h2>
+            <Card className="xl:col-span-2">
+              <CardContent className="space-y-4">
+                <div>
+                  <h2 className="text-xl font-semibold text-gray-900">Por fase processual</h2>
+                  <p className="text-sm text-gray-500">Distribuição e tempo médio por etapa.</p>
+                </div>
                 {(dados.porFase ?? []).length === 0 ? (
-                  <p className="text-gray-400 text-sm text-center py-4">Sem dados.</p>
+                  <p className="py-4 text-center text-sm text-gray-400">Sem dados.</p>
                 ) : (
-                  <div className="space-y-3">
+                  <div className="space-y-4">
                     {(dados.porFase ?? []).map(f => {
                       const cor = FASE_COLOR[f.fase] ?? '#6b7280'
-                      const pct = Math.round((f.totalProcessos / dados.resumo.totalProcessos) * 100)
+                      const pct = Math.max(6, Math.round((f.totalProcessos / Math.max(dados.resumo.totalProcessos, 1)) * 100))
                       return (
-                        <div key={f.fase}>
-                          <div className="flex justify-between items-center mb-1">
-                            <span className="text-sm font-medium text-gray-700">{f.fase}</span>
-                            <span className="text-xs text-gray-500">
-                              {f.totalProcessos} proc · {formatDias(f.mediaTempoTotal)} média
-                            </span>
+                        <button
+                          key={f.fase}
+                          type="button"
+                          onClick={() => {
+                            if (f.fase === 'Conhecimento') setFiltroResumo('conhecimento')
+                            else if (f.fase === 'Aguardando RPV') setFiltroResumo('rpv')
+                            else if (f.fase === 'Liquidação / Execução') setFiltroResumo('liquidacao')
+                            else if (f.fase === 'Sentenciado') setFiltroResumo('sentenca')
+                          }}
+                          className="block w-full text-left"
+                        >
+                          <div>
+                            <div className="mb-1 flex items-center justify-between gap-3">
+                              <span className="text-sm font-medium text-gray-700">{f.fase}</span>
+                              <span className="text-xs text-gray-500">{f.totalProcessos} proc. · {formatDias(f.mediaTempoTotal)} média</span>
+                            </div>
+                            <div className="h-2 w-full rounded-full bg-gray-100">
+                              <div className="h-2 rounded-full" style={{ width: `${pct}%`, backgroundColor: cor }} />
+                            </div>
                           </div>
-                          <div className="w-full bg-gray-100 rounded-full h-2">
-                            <div
-                              className="h-2 rounded-full"
-                              style={{ width: `${pct}%`, backgroundColor: cor }}
-                            />
-                          </div>
-                        </div>
+                        </button>
                       )
                     })}
                   </div>
@@ -250,17 +376,22 @@ const DashboardTempos: React.FC = () => {
             </Card>
           </div>
 
-          {/* Gráfico por Assunto */}
+          <Card>
+            <CardContent className="py-6 text-center">
+              <div className="text-3xl font-semibold text-amber-600">{formatDias(dados.resumo.mediaGeralDias)}</div>
+              <div className="mt-2 text-xs font-medium uppercase tracking-[0.2em] text-gray-500">Média Geral</div>
+            </CardContent>
+          </Card>
+
           {(dados.porAssunto ?? []).length > 0 && (
             <Card>
-              <CardContent>
-                <h2 className="font-semibold text-gray-900 mb-4">Processos por Assunto <span className="text-xs font-normal text-gray-400">(top 10)</span></h2>
-                <ResponsiveContainer width="100%" height={280}>
-                  <BarChart
-                    data={dados.porAssunto}
-                    layout="vertical"
-                    margin={{ top: 4, right: 40, left: 8, bottom: 4 }}
-                  >
+              <CardContent className="space-y-4">
+                <div>
+                  <h2 className="text-xl font-semibold text-gray-900">Processos por assunto</h2>
+                  <p className="text-sm text-gray-500">Top 10 assuntos mais recorrentes na base monitorada.</p>
+                </div>
+                <ResponsiveContainer width="100%" height={320}>
+                  <BarChart data={dados.porAssunto} layout="vertical" margin={{ top: 4, right: 40, left: 8, bottom: 4 }}>
                     <CartesianGrid strokeDasharray="3 3" horizontal={false} />
                     <XAxis type="number" allowDecimals={false} tick={{ fontSize: 12 }} />
                     <YAxis
@@ -273,7 +404,7 @@ const DashboardTempos: React.FC = () => {
                     <Tooltip />
                     <Bar dataKey="totalProcessos" name="Processos" radius={[0, 4, 4, 0]}>
                       {(dados.porAssunto ?? []).map((_, i) => (
-                        <Cell key={i} fill={i % 2 === 0 ? '#6366f1' : '#a5b4fc'} />
+                        <Cell key={i} fill={i % 2 === 0 ? '#2563eb' : '#93c5fd'} />
                       ))}
                       <LabelList dataKey="totalProcessos" position="right" style={{ fontSize: 12, fill: '#374151' }} />
                     </Bar>
