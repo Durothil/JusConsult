@@ -1,5 +1,38 @@
 import { apiClient } from './api'
 
+export const SETTINGS_KEYS = [
+  'anthropicToken',
+  'openaiToken',
+  'geminiToken',
+  'chatwootBaseUrl',
+  'chatwootAccountId',
+  'chatwootInboxId',
+  'chatwootApiToken',
+  'chatwootEnabled',
+  'chatwootMovementTypes',
+  'asaasEnvironment',
+  'asaasApiKey',
+  'asaasWebhookToken',
+] as const
+
+export const SECRET_SETTINGS_KEYS = [
+  'anthropicToken',
+  'openaiToken',
+  'geminiToken',
+  'chatwootApiToken',
+  'asaasApiKey',
+  'asaasWebhookToken',
+] as const
+
+export type SettingsKey = (typeof SETTINGS_KEYS)[number]
+export type SecretSettingsKey = (typeof SECRET_SETTINGS_KEYS)[number]
+
+export interface SecretSettingMeta {
+  configured: boolean
+  maskedValue?: string
+  isSecret: true
+}
+
 export interface AppSettings {
   anthropicToken?: string
   openaiToken?: string
@@ -10,112 +43,77 @@ export interface AppSettings {
   chatwootApiToken?: string
   chatwootEnabled?: string
   chatwootMovementTypes?: string
+  asaasEnvironment?: string
+  asaasApiKey?: string
+  asaasWebhookToken?: string
+  secretMeta?: Partial<Record<SecretSettingsKey, SecretSettingMeta>>
 }
 
-/**
- * Salva tokens de LLM nas configurações
- */
-export async function saveTokens(settings: AppSettings): Promise<void> {
-  const keys = [
-    'anthropicToken',
-    'openaiToken',
-    'geminiToken',
-    'chatwootBaseUrl',
-    'chatwootAccountId',
-    'chatwootInboxId',
-    'chatwootApiToken',
-    'chatwootEnabled',
-    'chatwootMovementTypes',
-  ] as const
+interface SettingsPayload {
+  values?: Partial<Record<SettingsKey, string>>
+  meta?: Partial<Record<SettingsKey, { configured: boolean; maskedValue?: string; isSecret?: boolean }>>
+}
 
-  for (const key of keys) {
+const SECRET_KEYS = new Set<SettingsKey>(SECRET_SETTINGS_KEYS)
+
+export async function saveTokens(settings: AppSettings): Promise<void> {
+  for (const key of SETTINGS_KEYS) {
     const value = settings[key]
-    if (value?.trim()) {
-      await apiClient.post('/api/settings', {
-        key,
-        value: value.trim()
-      })
+    const trimmed = typeof value === 'string' ? value.trim() : ''
+
+    if (SECRET_KEYS.has(key)) {
+      if (trimmed) {
+        await apiClient.post('/api/settings', { key, value: trimmed })
+      }
+      continue
+    }
+
+    if (trimmed) {
+      await apiClient.post('/api/settings', { key, value: trimmed })
     } else {
       await apiClient.delete(`/api/settings/${key}`)
     }
   }
 }
 
-/**
- * Obtém um token específico por chave
- */
-export async function getToken(
-  key:
-    | 'anthropicToken'
-    | 'openaiToken'
-    | 'geminiToken'
-    | 'chatwootBaseUrl'
-    | 'chatwootAccountId'
-    | 'chatwootInboxId'
-    | 'chatwootApiToken'
-    | 'chatwootEnabled'
-    | 'chatwootMovementTypes'
-): Promise<string | null> {
-  try {
-    const res = await apiClient.get<{ value: string }>(`/api/settings/${key}`)
-    return res.data.value || null
-  } catch (error) {
-    return null
-  }
-}
-
-/**
- * Obtém todos os tokens de LLM
- */
 export async function getTokens(): Promise<AppSettings> {
   try {
-    const [anthropic, openai, gemini, chatwootBaseUrl, chatwootAccountId, chatwootInboxId, chatwootApiToken, chatwootEnabled, chatwootMovementTypes] = await Promise.all([
-      getToken('anthropicToken'),
-      getToken('openaiToken'),
-      getToken('geminiToken'),
-      getToken('chatwootBaseUrl'),
-      getToken('chatwootAccountId'),
-      getToken('chatwootInboxId'),
-      getToken('chatwootApiToken'),
-      getToken('chatwootEnabled'),
-      getToken('chatwootMovementTypes'),
-    ])
+    const res = await apiClient.get<SettingsPayload>('/api/settings')
+    const values = res.data.values || {}
+    const meta = res.data.meta || {}
+
+    const secretMeta = Object.fromEntries(
+      SECRET_SETTINGS_KEYS.map(key => {
+        const item = meta[key]
+        return [key, { configured: Boolean(item?.configured), maskedValue: item?.maskedValue, isSecret: true as const }]
+      })
+    ) as Partial<Record<SecretSettingsKey, SecretSettingMeta>>
 
     return {
-      anthropicToken: anthropic || undefined,
-      openaiToken: openai || undefined,
-      geminiToken: gemini || undefined,
-      chatwootBaseUrl: chatwootBaseUrl || undefined,
-      chatwootAccountId: chatwootAccountId || undefined,
-      chatwootInboxId: chatwootInboxId || undefined,
-      chatwootApiToken: chatwootApiToken || undefined,
-      chatwootEnabled: chatwootEnabled || undefined,
-      chatwootMovementTypes: chatwootMovementTypes || undefined,
+      anthropicToken: values.anthropicToken,
+      openaiToken: values.openaiToken,
+      geminiToken: values.geminiToken,
+      chatwootBaseUrl: values.chatwootBaseUrl,
+      chatwootAccountId: values.chatwootAccountId,
+      chatwootInboxId: values.chatwootInboxId,
+      chatwootApiToken: values.chatwootApiToken,
+      chatwootEnabled: values.chatwootEnabled,
+      chatwootMovementTypes: values.chatwootMovementTypes,
+      asaasEnvironment: values.asaasEnvironment,
+      asaasApiKey: values.asaasApiKey,
+      asaasWebhookToken: values.asaasWebhookToken,
+      secretMeta,
     }
   } catch (error) {
-    if (import.meta.env.DEV) console.error('Erro ao obter tokens:', error)
-    return {}
+    if (import.meta.env.DEV) console.error('Erro ao obter configuracoes:', error)
+    return { secretMeta: {} }
   }
 }
 
-/**
- * Deleta um token
- */
-export async function deleteToken(
-  key:
-    | 'anthropicToken'
-    | 'openaiToken'
-    | 'geminiToken'
-    | 'chatwootBaseUrl'
-    | 'chatwootAccountId'
-    | 'chatwootInboxId'
-    | 'chatwootApiToken'
-    | 'chatwootEnabled'
-    | 'chatwootMovementTypes'
-): Promise<void> {
+export async function deleteToken(key: SettingsKey): Promise<void> {
   try {
     await apiClient.delete(`/api/settings/${key}`)
   } catch (error) {
-    if (import.meta.env.DEV) console.error('Erro ao deletar token:', error)
+    if (import.meta.env.DEV) console.error('Erro ao deletar configuracao:', error)
   }
 }

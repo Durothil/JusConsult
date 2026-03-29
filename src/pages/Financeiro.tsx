@@ -47,6 +47,30 @@ function todayPlus(days: number) {
   return dt.toISOString().slice(0, 10)
 }
 
+function startOfMonth() {
+  const dt = new Date()
+  dt.setDate(1)
+  return dt.toISOString().slice(0, 10)
+}
+
+function isRecebida(status: string) {
+  return ['RECEIVED', 'CONFIRMED', 'RECEIVED_IN_CASH'].includes(status)
+}
+
+function getEffectiveReceivedDate(item: FinanceiroCobranca) {
+  return item.paidAt ? item.paidAt.slice(0, 10) : undefined
+}
+
+function sumReceivedInRange(items: FinanceiroCobranca[], start: string, end: string) {
+  return items
+    .filter(item => {
+      if (!isRecebida(item.status)) return false
+      const paidDate = getEffectiveReceivedDate(item)
+      return !!paidDate && paidDate >= start && paidDate <= end
+    })
+    .reduce((acc, item) => acc + item.valor, 0)
+}
+
 export default function Financeiro() {
   const [clientes, setClientes] = useState<Cliente[]>([])
   const [cobrancas, setCobrancas] = useState<FinanceiroCobranca[]>([])
@@ -57,6 +81,9 @@ export default function Financeiro() {
   const [toast, setToast] = useState<ToastState>(null)
   const [filtroStatus, setFiltroStatus] = useState('')
   const [filtroClienteId, setFiltroClienteId] = useState('')
+  const [modoLista, setModoLista] = useState<'cliente' | 'escritorio'>('cliente')
+  const [periodoInicio, setPeriodoInicio] = useState(startOfMonth())
+  const [periodoFim, setPeriodoFim] = useState(todayPlus(0))
   const [form, setForm] = useState({
     clienteId: '',
     processoCnj: '',
@@ -76,12 +103,14 @@ export default function Financeiro() {
       setClientes(clientesData)
       setCobrancas(cobrancasData)
       if (!form.clienteId && clientesData.length > 0) {
-        setForm(prev => ({ ...prev, clienteId: clientesData[0].id }))
+        const primeiroClienteId = clientesData[0].id
+        setForm(prev => ({ ...prev, clienteId: primeiroClienteId }))
+        setFiltroClienteId(primeiroClienteId)
       }
     } catch (error) {
       setToast({
         type: 'error',
-        message: error instanceof Error ? error.message : 'Não foi possível carregar o financeiro.',
+        message: error instanceof Error ? error.message : 'Nao foi possivel carregar o financeiro.',
       })
     } finally {
       setLoading(false)
@@ -95,21 +124,33 @@ export default function Financeiro() {
   const cobrancasFiltradas = useMemo(() => {
     return cobrancas.filter(item => {
       const statusOk = !filtroStatus || item.status === filtroStatus
-      const clienteOk = !filtroClienteId || item.clienteId === filtroClienteId
+      const clienteOk = modoLista === 'escritorio' || !filtroClienteId || item.clienteId === filtroClienteId
       return statusOk && clienteOk
     })
-  }, [cobrancas, filtroStatus, filtroClienteId])
+  }, [cobrancas, filtroStatus, filtroClienteId, modoLista])
 
   const resumo = useMemo(() => {
-    const base = filtroClienteId ? cobrancas.filter(item => item.clienteId === filtroClienteId) : cobrancas
+    const base = modoLista === 'escritorio'
+      ? cobrancas
+      : filtroClienteId
+        ? cobrancas.filter(item => item.clienteId === filtroClienteId)
+        : []
     const pendentes = base.filter(item => item.status === 'PENDING').length
     const vencidas = base.filter(item => item.status === 'OVERDUE').length
-    const recebidas = base.filter(item => ['RECEIVED', 'CONFIRMED', 'RECEIVED_IN_CASH'].includes(item.status)).length
+    const recebidas = base.filter(item => isRecebida(item.status)).length
     const totalAberto = base
       .filter(item => ['PENDING', 'OVERDUE'].includes(item.status))
       .reduce((acc, item) => acc + item.valor, 0)
-    return { pendentes, vencidas, recebidas, totalAberto }
-  }, [cobrancas, filtroClienteId])
+    const hoje = todayPlus(0)
+    const inicioMes = startOfMonth()
+    const inicio30d = todayPlus(-30)
+    const recebidoMes = sumReceivedInRange(base, inicioMes, hoje)
+    const recebido30Dias = sumReceivedInRange(base, inicio30d, hoje)
+    const recebidoPeriodo = periodoInicio <= periodoFim
+      ? sumReceivedInRange(base, periodoInicio, periodoFim)
+      : 0
+    return { pendentes, vencidas, recebidas, totalAberto, recebidoMes, recebido30Dias, recebidoPeriodo }
+  }, [cobrancas, filtroClienteId, modoLista, periodoInicio, periodoFim])
 
   const handleSyncCliente = useCallback(async () => {
     if (!form.clienteId) {
@@ -123,7 +164,7 @@ export default function Financeiro() {
     } catch (error) {
       setToast({
         type: 'error',
-        message: error instanceof Error ? error.message : 'Não foi possível sincronizar o cliente.',
+        message: error instanceof Error ? error.message : 'Nao foi possivel sincronizar o cliente.',
       })
     } finally {
       setSyncingClientId(null)
@@ -135,11 +176,11 @@ export default function Financeiro() {
       setSyncingChargeId(id)
       const atualizada = await sincronizarCobranca(id)
       setCobrancas(prev => prev.map(item => item.id === id ? atualizada : item))
-      setToast({ type: 'success', message: 'Status da cobrança sincronizado com o Asaas.' })
+      setToast({ type: 'success', message: 'Status da cobranca sincronizado com o Asaas.' })
     } catch (error) {
       setToast({
         type: 'error',
-        message: error instanceof Error ? error.message : 'Não foi possível sincronizar a cobrança.',
+        message: error instanceof Error ? error.message : 'Nao foi possivel sincronizar a cobranca.',
       })
     } finally {
       setSyncingChargeId(null)
@@ -149,21 +190,21 @@ export default function Financeiro() {
   const handleCopyPix = useCallback(async (payload: string) => {
     try {
       await navigator.clipboard.writeText(payload)
-      setToast({ type: 'success', message: 'Código Pix copiado para a área de transferência.' })
+      setToast({ type: 'success', message: 'Codigo Pix copiado para a area de transferencia.' })
     } catch {
-      setToast({ type: 'error', message: 'Não foi possível copiar o código Pix neste navegador.' })
+      setToast({ type: 'error', message: 'Nao foi possivel copiar o codigo Pix neste navegador.' })
     }
   }, [])
 
   const handleSubmit = useCallback(async (e: React.FormEvent) => {
     e.preventDefault()
     if (!form.clienteId || !form.descricao.trim() || !form.valor || !form.dueDate) {
-      setToast({ type: 'error', message: 'Preencha cliente, descrição, valor e vencimento.' })
+      setToast({ type: 'error', message: 'Preencha cliente, descricao, valor e vencimento.' })
       return
     }
     const valor = Number(form.valor.replace(',', '.'))
     if (!Number.isFinite(valor) || valor <= 0) {
-      setToast({ type: 'error', message: 'Informe um valor válido para a cobrança.' })
+      setToast({ type: 'error', message: 'Informe um valor valido para a cobranca.' })
       return
     }
 
@@ -177,13 +218,15 @@ export default function Financeiro() {
         billingType: form.billingType,
         dueDate: form.dueDate,
       })
-      setToast({ type: 'success', message: 'Cobrança criada com sucesso.' })
+      setToast({ type: 'success', message: 'Cobranca criada com sucesso.' })
+      setFiltroClienteId(form.clienteId)
+      setModoLista('cliente')
       setForm(prev => ({ ...prev, descricao: '', valor: '', processoCnj: '', dueDate: todayPlus(7) }))
       await carregar()
     } catch (error) {
       setToast({
         type: 'error',
-        message: error instanceof Error ? error.message : 'Não foi possível criar a cobrança.',
+        message: error instanceof Error ? error.message : 'Nao foi possivel criar a cobranca.',
       })
     } finally {
       setSubmitting(false)
@@ -206,7 +249,7 @@ export default function Financeiro() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Financeiro</h1>
           <p className="text-sm text-gray-500 mt-1">
-            Emissão de cobranças com Asaas e acompanhamento de recebimentos.
+            Emissao de cobrancas com Asaas e acompanhamento de recebimentos.
           </p>
         </div>
         <Button variant="secondary" onClick={carregar}>Atualizar</Button>
@@ -223,13 +266,40 @@ export default function Financeiro() {
             <Card><CardContent className="py-5 text-center"><p className="text-2xl font-bold text-gray-800">{formatCurrencyBR(resumo.totalAberto)}</p><p className="text-xs text-gray-500 uppercase tracking-wide mt-2">Em aberto</p></CardContent></Card>
           </div>
 
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <Card><CardContent className="py-5 text-center"><p className="text-2xl font-bold text-emerald-700">{formatCurrencyBR(resumo.recebidoMes)}</p><p className="text-xs text-gray-500 uppercase tracking-wide mt-2">Recebido no mes</p></CardContent></Card>
+            <Card><CardContent className="py-5 text-center"><p className="text-2xl font-bold text-teal-700">{formatCurrencyBR(resumo.recebido30Dias)}</p><p className="text-xs text-gray-500 uppercase tracking-wide mt-2">Ultimos 30 dias</p></CardContent></Card>
+            <Card>
+              <CardContent className="py-5">
+                <div className="text-center mb-3">
+                  <p className="text-2xl font-bold text-cyan-700">{formatCurrencyBR(resumo.recebidoPeriodo)}</p>
+                  <p className="text-xs text-gray-500 uppercase tracking-wide mt-2">Periodo escolhido</p>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <input
+                    type="date"
+                    value={periodoInicio}
+                    onChange={e => setPeriodoInicio(e.target.value)}
+                    className="w-full border border-gray-300 rounded-md px-2 py-2 text-xs"
+                  />
+                  <input
+                    type="date"
+                    value={periodoFim}
+                    onChange={e => setPeriodoFim(e.target.value)}
+                    className="w-full border border-gray-300 rounded-md px-2 py-2 text-xs"
+                  />
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
           <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
             <Card className="xl:col-span-1">
               <CardContent className="space-y-4">
                 <div>
-                  <h2 className="text-lg font-semibold text-gray-900">Nova cobrança</h2>
+                  <h2 className="text-lg font-semibold text-gray-900">Nova cobranca</h2>
                   <p className="text-sm text-gray-500 mt-1">
-                    O sistema sincroniza o cliente no Asaas e gera a cobrança no mesmo fluxo.
+                    O sistema sincroniza o cliente no Asaas e gera a cobranca no mesmo fluxo.
                   </p>
                 </div>
 
@@ -238,7 +308,12 @@ export default function Financeiro() {
                     <label className="block text-sm font-medium text-gray-700 mb-1">Cliente</label>
                     <select
                       value={form.clienteId}
-                      onChange={e => setForm(prev => ({ ...prev, clienteId: e.target.value }))}
+                      onChange={e => {
+                        const nextClienteId = e.target.value
+                        setForm(prev => ({ ...prev, clienteId: nextClienteId }))
+                        setFiltroClienteId(nextClienteId)
+                        setModoLista('cliente')
+                      }}
                       className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
                     >
                       <option value="">Selecione</option>
@@ -259,12 +334,12 @@ export default function Financeiro() {
                   </Button>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Descrição</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Descricao</label>
                     <input
                       type="text"
                       value={form.descricao}
                       onChange={e => setForm(prev => ({ ...prev, descricao: e.target.value }))}
-                      placeholder="Honorários iniciais do processo"
+                      placeholder="Honorarios iniciais do processo"
                       className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
                     />
                   </div>
@@ -304,7 +379,7 @@ export default function Financeiro() {
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Forma de cobrança</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Forma de cobranca</label>
                     <select
                       value={form.billingType}
                       onChange={e => setForm(prev => ({ ...prev, billingType: e.target.value as BillingType }))}
@@ -317,7 +392,7 @@ export default function Financeiro() {
                   </div>
 
                   <Button type="submit" className="w-full" disabled={submitting}>
-                    {submitting ? 'Criando cobrança...' : 'Criar cobrança'}
+                    {submitting ? 'Criando cobranca...' : 'Criar cobranca'}
                   </Button>
                 </form>
               </CardContent>
@@ -327,18 +402,38 @@ export default function Financeiro() {
               <CardContent className="space-y-4">
                 <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
                   <div>
-                    <h2 className="text-lg font-semibold text-gray-900">Cobranças</h2>
+                    <h2 className="text-lg font-semibold text-gray-900">Cobrancas</h2>
                     <p className="text-sm text-gray-500 mt-1">
                       Lista local sincronizada com o retorno do Asaas e atualizada via webhook.
                     </p>
+                    <p className="text-xs text-gray-400 mt-1">
+                      {modoLista === 'escritorio'
+                        ? 'A lista mostra todas as cobrancas do escritorio.'
+                        : `Mostrando apenas as cobrancas de ${clientes.find(cliente => cliente.id === filtroClienteId)?.nome || 'um cliente selecionado'}.`}
+                    </p>
                   </div>
                   <div className="flex flex-col sm:flex-row gap-2">
+                    <Button
+                      variant={modoLista === 'cliente' ? 'secondary' : 'ghost'}
+                      size="sm"
+                      onClick={() => setModoLista('cliente')}
+                      disabled={!filtroClienteId}
+                    >
+                      Ver cliente selecionado
+                    </Button>
+                    <Button
+                      variant={modoLista === 'escritorio' ? 'secondary' : 'ghost'}
+                      size="sm"
+                      onClick={() => setModoLista('escritorio')}
+                    >
+                      Ver escritorio inteiro
+                    </Button>
                     <select
                       value={filtroClienteId}
-                      onChange={e => setFiltroClienteId(e.target.value)}
+                      onChange={e => { setFiltroClienteId(e.target.value); setModoLista(e.target.value ? 'cliente' : 'escritorio') }}
                       className="border border-gray-300 rounded-md px-3 py-2 text-sm"
                     >
-                      <option value="">Todos os clientes</option>
+                      <option value="">Selecione um cliente</option>
                       {clientes.map(cliente => (
                         <option key={cliente.id} value={cliente.id}>{cliente.nome}</option>
                       ))}
@@ -359,8 +454,8 @@ export default function Financeiro() {
 
                 {cobrancasFiltradas.length === 0 ? (
                   <Empty
-                    title="Nenhuma cobrança registrada"
-                    description="Crie a primeira cobrança para começar o controle financeiro."
+                    title="Nenhuma cobranca registrada"
+                    description="Crie a primeira cobranca para começar o controle financeiro."
                   />
                 ) : (
                   <div className="overflow-x-auto">
@@ -368,12 +463,12 @@ export default function Financeiro() {
                       <thead className="bg-gray-50">
                         <tr>
                           <th className="px-4 py-3 text-left font-medium text-gray-500 uppercase tracking-wider">Cliente</th>
-                          <th className="px-4 py-3 text-left font-medium text-gray-500 uppercase tracking-wider">Descrição</th>
+                          <th className="px-4 py-3 text-left font-medium text-gray-500 uppercase tracking-wider">Descricao</th>
                           <th className="px-4 py-3 text-left font-medium text-gray-500 uppercase tracking-wider">Forma</th>
                           <th className="px-4 py-3 text-left font-medium text-gray-500 uppercase tracking-wider">Venc.</th>
                           <th className="px-4 py-3 text-left font-medium text-gray-500 uppercase tracking-wider">Valor</th>
                           <th className="px-4 py-3 text-left font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                          <th className="px-4 py-3 text-left font-medium text-gray-500 uppercase tracking-wider">Ações</th>
+                          <th className="px-4 py-3 text-left font-medium text-gray-500 uppercase tracking-wider">Acoes</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-100 bg-white">
@@ -447,3 +542,4 @@ export default function Financeiro() {
     </div>
   )
 }
+

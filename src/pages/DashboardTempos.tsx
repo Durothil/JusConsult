@@ -16,9 +16,10 @@ import Card, { CardContent } from '@/components/common/Card'
 import Button from '@/components/common/Button'
 import { Spinner } from '@/components/common/Loading'
 import Empty from '@/components/common/Empty'
-import { listarMetricasTempo } from '@/services/escritorio.service'
+import { EditarFaseModal } from '@/components/process/EditarFaseModal'
+import { listarMetricasTempo, verificarCadastro } from '@/services/escritorio.service'
 import { apiClient } from '@/services/api'
-import type { MetricasTempo, ProcessoTempoResumo } from '@/types/escritorio'
+import type { MetricasTempo, ProcessoTempoResumo, EscritorioProcesso } from '@/types/escritorio'
 
 const FASE_COLOR: Record<string, string> = {
   Conhecimento: '#3b82f6',
@@ -110,6 +111,8 @@ const DashboardTempos: React.FC = () => {
   const [sincronizando, setSincronizando] = useState(false)
   const [msgSync, setMsgSync] = useState<string | null>(null)
   const [filtroResumo, setFiltroResumo] = useState<FiltroResumo>('todos')
+  const [modalOpen, setModalOpen] = useState(false)
+  const [processoSelecionado, setProcessoSelecionado] = useState<EscritorioProcesso | null>(null)
 
   const carregar = useCallback(async (p: Periodo) => {
     setLoading(true)
@@ -140,6 +143,16 @@ const DashboardTempos: React.FC = () => {
       setSincronizando(false)
     }
   }, [carregar, periodo])
+
+  const handleAbrirProcesso = useCallback(async (cnj: string) => {
+    try {
+      const processo = await verificarCadastro(cnj)
+      setProcessoSelecionado(processo)
+      setModalOpen(true)
+    } catch {
+      navigate(`/process/${encodeURIComponent(cnj)}`)
+    }
+  }, [navigate])
 
   useEffect(() => {
     carregar(periodo)
@@ -290,7 +303,7 @@ const DashboardTempos: React.FC = () => {
                             <td className="px-4 py-3 text-gray-700">{formatDias(processo.tempoTotalDias)}</td>
                             <td className="px-4 py-3 text-gray-700">{formatDate(processo.ultimaMovimentacaoData)}</td>
                             <td className="px-4 py-3">
-                              <Button variant="secondary" size="sm" onClick={() => navigate(`/process/${encodeURIComponent(processo.cnj)}`)}>
+                              <Button variant="secondary" size="sm" onClick={() => handleAbrirProcesso(processo.cnj)}>
                                 Abrir processo
                               </Button>
                             </td>
@@ -415,6 +428,20 @@ const DashboardTempos: React.FC = () => {
           )}
         </>
       )}
+
+      <EditarFaseModal
+        isOpen={modalOpen}
+        onClose={() => {
+          setModalOpen(false)
+          setProcessoSelecionado(null)
+        }}
+        onSuccess={() => {
+          if (processoSelecionado) {
+            navigate(`/process/${encodeURIComponent(processoSelecionado.cnj)}`)
+          }
+        }}
+        processo={processoSelecionado}
+      />
     </div>
   )
 }

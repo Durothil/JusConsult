@@ -1,4 +1,6 @@
-import type { Process } from './process'
+﻿import type { Process } from './process'
+
+export type FaseProcessual = 'CONHECIMENTO' | 'SENTENCIADO' | 'LIQUIDACAO_EXECUCAO' | 'AGUARDANDO_RPV' | 'ARQUIVADO'
 
 export interface EscritorioProcesso {
   id: string
@@ -6,6 +8,7 @@ export interface EscritorioProcesso {
   clienteNome: string
   clientePolo: 'ATIVO' | 'PASSIVO' | 'TERCEIRO'
   clienteId?: string
+  faseProcessual?: FaseProcessual
   responsavel?: string
   vara?: string
   monitorar: boolean
@@ -14,7 +17,6 @@ export interface EscritorioProcesso {
   ultimoHashMovimento?: string
   createdAt: string
   updatedAt: string
-  // Dados do processo (join)
   processo?: Process
   alertasNaoLidos?: number
 }
@@ -33,6 +35,7 @@ export interface CadastroProcessoInput {
   clienteNome: string
   clientePolo: 'ATIVO' | 'PASSIVO' | 'TERCEIRO'
   clienteId?: string
+  faseProcessual?: FaseProcessual
   responsavel?: string
   vara?: string
   monitorar?: boolean
@@ -71,11 +74,27 @@ export interface AssuntoMetrica {
   totalProcessos: number
 }
 
+export interface ProcessoTempoResumo {
+  cnj: string
+  clienteNome: string
+  tribunal: string | null
+  classe: string | null
+  assunto: string | null
+  fase: string
+  tempoTotalDias: number | null
+  ultimaMovimentacaoData: string | null
+  temSentenca: boolean
+  emLiquidacao: boolean
+  aguardandoRpv: boolean
+}
+
 export interface ResumoMetrica {
   totalProcessos: number
   processosComMovimentos: number
   processosComSentenca: number
   processosEmLiquidacao: number
+  processosEmConhecimento: number
+  processosAguardandoRpv: number
   mediaGeralDias: number | null
 }
 
@@ -84,5 +103,7 @@ export interface MetricasTempo {
   porTipoAcao: TipoAcaoMetrica[]
   porFase: FaseMetrica[]
   porAssunto: AssuntoMetrica[]
+  processos: ProcessoTempoResumo[]
   resumo: ResumoMetrica
 }
+

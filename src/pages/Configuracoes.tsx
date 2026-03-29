@@ -1,7 +1,15 @@
 import { useEffect, useState } from 'react'
 import { Check, X } from 'lucide-react'
+import Card, { CardContent } from '@/components/common/Card'
+import Button from '@/components/common/Button'
 import { enviarMensagemTesteChatwoot } from '@/services/chatwoot.service'
-import { deleteToken, getTokens, saveTokens } from '@/services/settings.service'
+import {
+  deleteToken,
+  getTokens,
+  saveTokens,
+  type SecretSettingMeta,
+  type SecretSettingsKey,
+} from '@/services/settings.service'
 
 type ConfigState = {
   anthropicToken: string
@@ -25,11 +33,11 @@ type TestState = {
 }
 
 const MOVEMENT_OPTIONS = [
-  { key: 'sentenca', label: 'Sentença e acórdão' },
-  { key: 'decisao', label: 'Decisão e despacho' },
-  { key: 'audiencia', label: 'Audiência e perícia' },
-  { key: 'intimacao', label: 'Intimação e expedição' },
-  { key: 'pagamento', label: 'Pagamento, RPV e precatório' },
+  { key: 'sentenca', label: 'Sentenca e acordao' },
+  { key: 'decisao', label: 'Decisao e despacho' },
+  { key: 'audiencia', label: 'Audiencia e pericia' },
+  { key: 'intimacao', label: 'Intimacao e expedicao' },
+  { key: 'pagamento', label: 'Pagamento, RPV e precatorio' },
   { key: 'encerramento', label: 'Arquivamento e baixa' },
 ] as const
 
@@ -53,15 +61,23 @@ const EMPTY_STATE: ConfigState = {
 const EMPTY_TEST: TestState = {
   nome: '',
   whatsapp: '',
-  mensagem: 'Esta é uma mensagem de teste do JusFlow via Chatwoot.',
+  mensagem: 'Esta e uma mensagem de teste do JusFlow via Chatwoot.',
+}
+
+const EMPTY_SECRET_META: Record<SecretSettingsKey, SecretSettingMeta> = {
+  anthropicToken: { configured: false, isSecret: true },
+  openaiToken: { configured: false, isSecret: true },
+  geminiToken: { configured: false, isSecret: true },
+  chatwootApiToken: { configured: false, isSecret: true },
+  asaasApiKey: { configured: false, isSecret: true },
+  asaasWebhookToken: { configured: false, isSecret: true },
 }
 
 function normalizeWhatsappPreview(value: string) {
   const raw = value.trim()
   if (!raw) return ''
-
   const hasPlusPrefix = raw.startsWith('+')
-  const digits = raw.replace(/\D/g, '')
+  const digits = raw.replace(/D/g, '')
   if (!digits) return ''
   if (hasPlusPrefix) return `+${digits}`
   if (digits.startsWith('00')) return `+${digits.slice(2)}`
@@ -74,8 +90,66 @@ function parseMovementTypes(value: string) {
   return new Set(value.split(',').map(item => item.trim()).filter(Boolean))
 }
 
+function buildSecretHelper(meta?: SecretSettingMeta, currentValue?: string) {
+  if (currentValue?.trim()) return 'O novo valor sera salvo quando voce clicar em salvar configuracoes.'
+  if (meta?.configured) {
+    if (meta.maskedValue) return `Configurado no servidor como ${meta.maskedValue}. Preencha apenas para substituir.`
+    return 'Configurado no servidor. Preencha apenas para substituir.'
+  }
+  return 'Ainda nao configurado.'
+}
+
+function InputRow({
+  label,
+  value,
+  placeholder,
+  onChange,
+  onClear,
+  type = 'text',
+  configured = false,
+  helperText,
+}: {
+  label: string
+  value: string
+  placeholder: string
+  onChange: (value: string) => void
+  onClear: () => void
+  type?: 'text' | 'password'
+  configured?: boolean
+  helperText?: string
+}) {
+  const showClear = Boolean(value || configured)
+
+  return (
+    <div className="space-y-2">
+      <label className="block text-sm font-medium text-gray-900">{label}</label>
+      <div className="flex gap-2">
+        <input
+          type={type}
+          value={value}
+          onChange={e => onChange(e.target.value)}
+          placeholder={placeholder}
+          className="flex-1 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm text-gray-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+        />
+        {showClear && (
+          <button
+            type="button"
+            onClick={onClear}
+            className="rounded-lg border border-red-200 px-3 text-red-600 transition-colors hover:bg-red-50"
+            title="Limpar"
+          >
+            <X size={18} />
+          </button>
+        )}
+      </div>
+      {helperText ? <p className="text-xs text-gray-500">{helperText}</p> : null}
+    </div>
+  )
+}
+
 export default function Configuracoes() {
   const [settings, setSettings] = useState<ConfigState>(EMPTY_STATE)
+  const [secretMeta, setSecretMeta] = useState<Record<SecretSettingsKey, SecretSettingMeta>>(EMPTY_SECRET_META)
   const [testData, setTestData] = useState<TestState>(EMPTY_TEST)
   const [saved, setSaved] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -94,21 +168,25 @@ export default function Configuracoes() {
       setError(null)
       const loaded = await getTokens()
       setSettings({
-        anthropicToken: loaded.anthropicToken || '',
-        openaiToken: loaded.openaiToken || '',
-        geminiToken: loaded.geminiToken || '',
+        anthropicToken: '',
+        openaiToken: '',
+        geminiToken: '',
         chatwootBaseUrl: loaded.chatwootBaseUrl || '',
         chatwootAccountId: loaded.chatwootAccountId || '',
         chatwootInboxId: loaded.chatwootInboxId || '',
-        chatwootApiToken: loaded.chatwootApiToken || '',
+        chatwootApiToken: '',
         chatwootEnabled: loaded.chatwootEnabled || 'true',
         chatwootMovementTypes: loaded.chatwootMovementTypes || DEFAULT_MOVEMENT_TYPES,
         asaasEnvironment: loaded.asaasEnvironment || 'sandbox',
-        asaasApiKey: loaded.asaasApiKey || '',
-        asaasWebhookToken: loaded.asaasWebhookToken || '',
+        asaasApiKey: '',
+        asaasWebhookToken: '',
+      })
+      setSecretMeta({
+        ...EMPTY_SECRET_META,
+        ...loaded.secretMeta,
       })
     } catch {
-      setError('Erro ao carregar configurações')
+      setError('Erro ao carregar configuracoes')
     } finally {
       setLoading(false)
     }
@@ -124,10 +202,7 @@ export default function Configuracoes() {
       const selected = parseMovementTypes(prev.chatwootMovementTypes)
       if (selected.has(key)) selected.delete(key)
       else selected.add(key)
-      return {
-        ...prev,
-        chatwootMovementTypes: Array.from(selected).join(','),
-      }
+      return { ...prev, chatwootMovementTypes: Array.from(selected).join(',') }
     })
     setSaved(false)
   }
@@ -137,10 +212,11 @@ export default function Configuracoes() {
       setSaving(true)
       setError(null)
       await saveTokens(settings)
+      await loadSettings()
       setSaved(true)
       setTimeout(() => setSaved(false), 3000)
     } catch {
-      setError('Erro ao salvar configurações')
+      setError('Erro ao salvar configuracoes')
     } finally {
       setSaving(false)
     }
@@ -152,11 +228,21 @@ export default function Configuracoes() {
       chatwootMovementTypes: DEFAULT_MOVEMENT_TYPES,
       asaasEnvironment: 'sandbox',
     }
+
     try {
+      setError(null)
       setSettings(prev => ({ ...prev, [key]: fallbackMap[key] ?? '' }))
       await deleteToken(key)
+
+      if (key in EMPTY_SECRET_META) {
+        const secretKey = key as SecretSettingsKey
+        setSecretMeta(prev => ({
+          ...prev,
+          [secretKey]: { configured: false, isSecret: true },
+        }))
+      }
     } catch {
-      setError('Erro ao limpar configuração')
+      setError('Erro ao limpar configuracao')
     }
   }
 
@@ -178,268 +264,238 @@ export default function Configuracoes() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
+      <div className="flex min-h-[60vh] items-center justify-center">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-gray-600">Carregando configurações...</p>
+          <div className="mx-auto mb-4 h-12 w-12 animate-spin rounded-full border-b-2 border-blue-600" />
+          <p className="text-gray-600">Carregando configuracoes...</p>
         </div>
       </div>
     )
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 py-8 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-3xl mx-auto">
-        <div className="bg-white shadow-lg rounded-lg overflow-hidden">
-          <div className="bg-gradient-to-r from-blue-600 to-blue-800 px-6 py-8">
-            <h1 className="text-3xl font-bold text-white">Configurações</h1>
-            <p className="text-blue-100 mt-2">Tokens de IA, Chatwoot e gateway financeiro</p>
-          </div>
-
-          <div className="p-6 sm:p-8 space-y-8">
-            {error && (
-              <div className="p-4 bg-red-50 border border-red-200 rounded-lg text-red-700">
-                {error}
-              </div>
-            )}
-
-            {saved && (
-              <div className="p-4 bg-green-50 border border-green-200 rounded-lg text-green-700 flex items-center gap-2">
-                <Check size={20} />
-                Configurações salvas com sucesso!
-              </div>
-            )}
-
-            {testMessage && (
-              <div className="p-4 bg-green-50 border border-green-200 rounded-lg text-green-700">
-                {testMessage}
-              </div>
-            )}
-
-            <section className="space-y-4">
-              <div>
-                <h2 className="text-xl font-semibold text-gray-900">IA</h2>
-                <p className="text-sm text-gray-600 mt-1">
-                  Usada para explicar a movimentação do processo em linguagem simples antes do envio ao cliente.
-                </p>
-              </div>
-
-              {[
-                ['anthropicToken', 'Token Anthropic Claude', 'sk-ant-...'],
-                ['openaiToken', 'Token OpenAI', 'sk-...'],
-                ['geminiToken', 'Token Google Gemini', 'AIza...'],
-              ].map(([key, label, placeholder]) => (
-                <div key={key} className="bg-gray-50 p-4 rounded-lg border border-gray-200">
-                  <label className="block text-sm font-medium text-gray-900 mb-2">{label}</label>
-                  <div className="flex gap-2">
-                    <input
-                      type="password"
-                      value={settings[key as keyof ConfigState]}
-                      onChange={e => handleChange(key as keyof ConfigState, e.target.value)}
-                      placeholder={placeholder}
-                      className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                    {settings[key as keyof ConfigState] && (
-                      <button
-                        onClick={() => handleClear(key as keyof ConfigState)}
-                        className="px-3 py-2 text-red-600 hover:bg-red-50 rounded-lg"
-                        title="Limpar"
-                      >
-                        <X size={20} />
-                      </button>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </section>
-
-            <section className="space-y-4">
-              <div>
-                <h2 className="text-xl font-semibold text-gray-900">Asaas</h2>
-                <p className="text-sm text-gray-600 mt-1">
-                  Configuração do gateway financeiro para emissão de cobranças e recebimento de webhooks.
-                </p>
-              </div>
-
-              <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
-                <label className="block text-sm font-medium text-gray-900 mb-2">Ambiente</label>
-                <select
-                  value={settings.asaasEnvironment}
-                  onChange={e => handleChange('asaasEnvironment', e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="sandbox">Sandbox</option>
-                  <option value="production">Produção</option>
-                </select>
-              </div>
-
-              {[
-                ['asaasApiKey', 'API Key do Asaas', '$aact_...'],
-                ['asaasWebhookToken', 'Token de validação do webhook', 'token-seguro-para-validar-callback'],
-              ].map(([key, label, placeholder]) => (
-                <div key={key} className="bg-gray-50 p-4 rounded-lg border border-gray-200">
-                  <label className="block text-sm font-medium text-gray-900 mb-2">{label}</label>
-                  <div className="flex gap-2">
-                    <input
-                      type="password"
-                      value={settings[key as keyof ConfigState]}
-                      onChange={e => handleChange(key as keyof ConfigState, e.target.value)}
-                      placeholder={placeholder}
-                      className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                    {settings[key as keyof ConfigState] && (
-                      <button
-                        onClick={() => handleClear(key as keyof ConfigState)}
-                        className="px-3 py-2 text-red-600 hover:bg-red-50 rounded-lg"
-                        title="Limpar"
-                      >
-                        <X size={20} />
-                      </button>
-                    )}
-                  </div>
-                </div>
-              ))}
-
-              <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-800">
-                Use Sandbox durante os testes. O backend envia as requisições para <code>api-sandbox.asaas.com/v3</code> ou <code>api.asaas.com/v3</code> conforme o ambiente salvo.
-              </div>
-            </section>
-
-            <section className="space-y-4">
-              <div>
-                <h2 className="text-xl font-semibold text-gray-900">Chatwoot</h2>
-                <p className="text-sm text-gray-600 mt-1">
-                  O sistema cria ou reaproveita o contato, abre conversa no inbox de API e envia atualizações importantes do processo.
-                </p>
-              </div>
-
-              <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
-                <label className="block text-sm font-medium text-gray-900 mb-2">Envio automático</label>
-                <select
-                  value={settings.chatwootEnabled}
-                  onChange={e => handleChange('chatwootEnabled', e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="true">Ativado</option>
-                  <option value="false">Desativado</option>
-                </select>
-              </div>
-
-              {[
-                ['chatwootBaseUrl', 'URL base do Chatwoot', 'https://app.seu-chatwoot.com'],
-                ['chatwootAccountId', 'Account ID', '1'],
-                ['chatwootInboxId', 'Inbox ID (API channel)', '12'],
-                ['chatwootApiToken', 'API access token', 'seu-token-do-chatwoot'],
-              ].map(([key, label, placeholder]) => (
-                <div key={key} className="bg-gray-50 p-4 rounded-lg border border-gray-200">
-                  <label className="block text-sm font-medium text-gray-900 mb-2">{label}</label>
-                  <div className="flex gap-2">
-                    <input
-                      type={key === 'chatwootApiToken' ? 'password' : 'text'}
-                      value={settings[key as keyof ConfigState]}
-                      onChange={e => handleChange(key as keyof ConfigState, e.target.value)}
-                      placeholder={placeholder}
-                      className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                    {settings[key as keyof ConfigState] && (
-                      <button
-                        onClick={() => handleClear(key as keyof ConfigState)}
-                        className="px-3 py-2 text-red-600 hover:bg-red-50 rounded-lg"
-                        title="Limpar"
-                      >
-                        <X size={20} />
-                      </button>
-                    )}
-                  </div>
-                </div>
-              ))}
-
-              <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
-                <label className="block text-sm font-medium text-gray-900 mb-3">
-                  Tipos de movimentação que devem gerar mensagem ao cliente
-                </label>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {MOVEMENT_OPTIONS.map(option => (
-                    <label key={option.key} className="flex items-center gap-3 text-sm text-gray-700">
-                      <input
-                        type="checkbox"
-                        checked={selectedMovementTypes.has(option.key)}
-                        onChange={() => toggleMovementType(option.key)}
-                        className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                      />
-                      <span>{option.label}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-
-              <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-800">
-                Use um inbox do tipo API no Chatwoot. O contato precisa ter WhatsApp preenchido no cadastro do cliente para receber a mensagem.
-              </div>
-            </section>
-
-            <section className="space-y-4">
-              <div>
-                <h2 className="text-xl font-semibold text-gray-900">Teste de envio</h2>
-                <p className="text-sm text-gray-600 mt-1">
-                  Envia uma mensagem manual pelo Chatwoot para validar a integração antes de liberar o disparo automático.
-                </p>
-              </div>
-
-              <div className="bg-gray-50 p-4 rounded-lg border border-gray-200 space-y-3">
-                <input
-                  type="text"
-                  value={testData.nome}
-                  onChange={e => setTestData(prev => ({ ...prev, nome: e.target.value }))}
-                  placeholder="Nome do contato"
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-                <input
-                  type="text"
-                  value={testData.whatsapp}
-                  onChange={e => setTestData(prev => ({ ...prev, whatsapp: e.target.value }))}
-                  placeholder="WhatsApp com DDI, ex: 5581999999999"
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-                {testData.whatsapp.trim() && (
-                  <p className="text-xs text-gray-500">
-                    Formato enviado ao Chatwoot: {normalizeWhatsappPreview(testData.whatsapp)}
-                  </p>
-                )}
-                <textarea
-                  value={testData.mensagem}
-                  onChange={e => setTestData(prev => ({ ...prev, mensagem: e.target.value }))}
-                  rows={4}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
-                />
-                <button
-                  onClick={handleSendTest}
-                  disabled={sendingTest || !testData.nome.trim() || !testData.whatsapp.trim() || !testData.mensagem.trim()}
-                  className="w-full px-6 py-3 bg-emerald-600 text-white font-medium rounded-lg hover:bg-emerald-700 disabled:bg-gray-400 transition-colors"
-                >
-                  {sendingTest ? 'Enviando teste...' : 'Enviar mensagem teste'}
-                </button>
-              </div>
-            </section>
-
-            <div className="flex gap-4">
-              <button
-                onClick={handleSave}
-                disabled={saving}
-                className="flex-1 px-6 py-3 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 disabled:bg-gray-400 transition-colors"
-              >
-                {saving ? 'Salvando...' : 'Salvar configurações'}
-              </button>
-              <button
-                onClick={loadSettings}
-                className="px-6 py-3 text-gray-700 font-medium border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
-              >
-                Recarregar
-              </button>
-            </div>
-          </div>
+    <div className="p-6 space-y-6">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <h1 className="text-3xl font-semibold text-gray-900">Configuracoes</h1>
+          <p className="mt-1 text-sm text-gray-500">Central unica para IA, Asaas e Chatwoot com segredos protegidos no servidor.</p>
+        </div>
+        <div className="flex gap-3">
+          <Button variant="secondary" onClick={loadSettings}>Recarregar</Button>
+          <Button onClick={handleSave} disabled={saving}>{saving ? 'Salvando...' : 'Salvar configuracoes'}</Button>
         </div>
       </div>
+
+      {error ? <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}
+      {saved ? (
+        <div className="flex items-center gap-2 rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">
+          <Check size={18} /> Configuracoes salvas com sucesso.
+        </div>
+      ) : null}
+      {testMessage ? <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">{testMessage}</div> : null}
+
+      <Card>
+        <CardContent className="space-y-5 py-5">
+          <div>
+            <h2 className="text-xl font-semibold text-gray-900">IA</h2>
+            <p className="text-sm text-gray-500">Tokens usados para explicacoes processuais e assistente juridico.</p>
+          </div>
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+            <InputRow
+              label="Token Anthropic Claude"
+              value={settings.anthropicToken}
+              placeholder={secretMeta.anthropicToken.maskedValue || 'sk-ant-...'}
+              onChange={value => handleChange('anthropicToken', value)}
+              onClear={() => handleClear('anthropicToken')}
+              type="password"
+              configured={secretMeta.anthropicToken.configured}
+              helperText={buildSecretHelper(secretMeta.anthropicToken, settings.anthropicToken)}
+            />
+            <InputRow
+              label="Token OpenAI"
+              value={settings.openaiToken}
+              placeholder={secretMeta.openaiToken.maskedValue || 'sk-...'}
+              onChange={value => handleChange('openaiToken', value)}
+              onClear={() => handleClear('openaiToken')}
+              type="password"
+              configured={secretMeta.openaiToken.configured}
+              helperText={buildSecretHelper(secretMeta.openaiToken, settings.openaiToken)}
+            />
+            <InputRow
+              label="Token Google Gemini"
+              value={settings.geminiToken}
+              placeholder={secretMeta.geminiToken.maskedValue || 'AIza...'}
+              onChange={value => handleChange('geminiToken', value)}
+              onClear={() => handleClear('geminiToken')}
+              type="password"
+              configured={secretMeta.geminiToken.configured}
+              helperText={buildSecretHelper(secretMeta.geminiToken, settings.geminiToken)}
+            />
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardContent className="space-y-5 py-5">
+          <div>
+            <h2 className="text-xl font-semibold text-gray-900">Asaas</h2>
+            <p className="text-sm text-gray-500">Gateway financeiro para emissao de cobrancas e recebimento de webhooks.</p>
+          </div>
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+            <div className="space-y-2">
+              <label className="block text-sm font-medium text-gray-900">Ambiente</label>
+              <select
+                value={settings.asaasEnvironment}
+                onChange={e => handleChange('asaasEnvironment', e.target.value)}
+                className="w-full rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm text-gray-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="sandbox">Sandbox</option>
+                <option value="production">Producao</option>
+              </select>
+            </div>
+            <InputRow
+              label="API Key do Asaas"
+              value={settings.asaasApiKey}
+              placeholder={secretMeta.asaasApiKey.maskedValue || '$aact_...'}
+              onChange={value => handleChange('asaasApiKey', value)}
+              onClear={() => handleClear('asaasApiKey')}
+              type="password"
+              configured={secretMeta.asaasApiKey.configured}
+              helperText={buildSecretHelper(secretMeta.asaasApiKey, settings.asaasApiKey)}
+            />
+            <InputRow
+              label="Token de validacao do webhook"
+              value={settings.asaasWebhookToken}
+              placeholder={secretMeta.asaasWebhookToken.maskedValue || 'token-seguro-para-validar-callback'}
+              onChange={value => handleChange('asaasWebhookToken', value)}
+              onClear={() => handleClear('asaasWebhookToken')}
+              type="password"
+              configured={secretMeta.asaasWebhookToken.configured}
+              helperText={buildSecretHelper(secretMeta.asaasWebhookToken, settings.asaasWebhookToken)}
+            />
+          </div>
+          <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+            Use Sandbox durante os testes. O backend envia as requisicoes para <code>api-sandbox.asaas.com/v3</code> ou <code>api.asaas.com/v3</code> conforme o ambiente salvo.
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardContent className="space-y-5 py-5">
+          <div>
+            <h2 className="text-xl font-semibold text-gray-900">Chatwoot</h2>
+            <p className="text-sm text-gray-500">Integracao de comunicacao com o cliente e automacoes de envio.</p>
+          </div>
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+            <div className="space-y-2">
+              <label className="block text-sm font-medium text-gray-900">Envio automatico</label>
+              <select
+                value={settings.chatwootEnabled}
+                onChange={e => handleChange('chatwootEnabled', e.target.value)}
+                className="w-full rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm text-gray-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="true">Ativado</option>
+                <option value="false">Desativado</option>
+              </select>
+            </div>
+            <InputRow
+              label="URL base do Chatwoot"
+              value={settings.chatwootBaseUrl}
+              placeholder="https://app.seu-chatwoot.com"
+              onChange={value => handleChange('chatwootBaseUrl', value)}
+              onClear={() => handleClear('chatwootBaseUrl')}
+            />
+            <InputRow
+              label="Account ID"
+              value={settings.chatwootAccountId}
+              placeholder="1"
+              onChange={value => handleChange('chatwootAccountId', value)}
+              onClear={() => handleClear('chatwootAccountId')}
+            />
+            <InputRow
+              label="Inbox ID (API channel)"
+              value={settings.chatwootInboxId}
+              placeholder="12"
+              onChange={value => handleChange('chatwootInboxId', value)}
+              onClear={() => handleClear('chatwootInboxId')}
+            />
+            <InputRow
+              label="API access token"
+              value={settings.chatwootApiToken}
+              placeholder={secretMeta.chatwootApiToken.maskedValue || 'seu-token-do-chatwoot'}
+              onChange={value => handleChange('chatwootApiToken', value)}
+              onClear={() => handleClear('chatwootApiToken')}
+              type="password"
+              configured={secretMeta.chatwootApiToken.configured}
+              helperText={buildSecretHelper(secretMeta.chatwootApiToken, settings.chatwootApiToken)}
+            />
+          </div>
+          <div className="space-y-3">
+            <label className="block text-sm font-medium text-gray-900">Tipos de movimentacao que devem gerar mensagem ao cliente</label>
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+              {MOVEMENT_OPTIONS.map(option => (
+                <label key={option.key} className="flex items-center gap-3 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-700">
+                  <input
+                    type="checkbox"
+                    checked={selectedMovementTypes.has(option.key)}
+                    onChange={() => toggleMovementType(option.key)}
+                    className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  <span>{option.label}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+          <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+            Use um inbox do tipo API no Chatwoot. O contato precisa ter WhatsApp preenchido no cadastro do cliente para receber a mensagem.
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardContent className="space-y-5 py-5">
+          <div>
+            <h2 className="text-xl font-semibold text-gray-900">Teste de envio</h2>
+            <p className="text-sm text-gray-500">Valide a integracao do Chatwoot antes de liberar o disparo automatico.</p>
+          </div>
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+            <input
+              type="text"
+              value={testData.nome}
+              onChange={e => setTestData(prev => ({ ...prev, nome: e.target.value }))}
+              placeholder="Nome do contato"
+              className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm text-gray-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            <input
+              type="text"
+              value={testData.whatsapp}
+              onChange={e => setTestData(prev => ({ ...prev, whatsapp: e.target.value }))}
+              placeholder="WhatsApp com DDI, ex: 5581999999999"
+              className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm text-gray-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+          {testData.whatsapp.trim() ? (
+            <p className="text-xs text-gray-500">Formato enviado ao Chatwoot: {normalizeWhatsappPreview(testData.whatsapp)}</p>
+          ) : null}
+          <textarea
+            value={testData.mensagem}
+            onChange={e => setTestData(prev => ({ ...prev, mensagem: e.target.value }))}
+            rows={4}
+            className="w-full resize-none rounded-lg border border-gray-300 bg-white px-4 py-3 text-sm text-gray-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            Este teste valida a integracao, mas nao entra na trilha auditada da central de comunicacao.
+          </div>
+          <div className="flex justify-end">
+            <Button
+              onClick={handleSendTest}
+              disabled={sendingTest || !testData.nome.trim() || !testData.whatsapp.trim() || !testData.mensagem.trim()}
+            >
+              {sendingTest ? 'Enviando teste...' : 'Enviar mensagem teste'}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   )
 }

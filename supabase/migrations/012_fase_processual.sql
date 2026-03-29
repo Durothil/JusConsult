@@ -15,7 +15,8 @@ begin
           'CONHECIMENTO',
           'SENTENCIADO',
           'LIQUIDACAO_EXECUCAO',
-          'AGUARDANDO_RPV'
+          'AGUARDANDO_RPV',
+          'ARQUIVADO'
         )
       );
   end if;
@@ -23,3 +24,4 @@ end $$;
 
 create index if not exists idx_escritorio_processos_fase_processual
   on escritorio_processos (fase_processual);
+

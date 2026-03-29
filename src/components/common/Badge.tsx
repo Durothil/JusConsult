@@ -7,18 +7,18 @@ interface BadgeProps extends React.HTMLAttributes<HTMLSpanElement> {
 }
 
 const badgeVariants: Record<string, string> = {
-  default: 'bg-border text-text-base',
-  success: 'bg-green-50 text-success',
-  warning: 'bg-amber-50 text-warning',
-  danger: 'bg-danger-bg text-danger',
-  info: 'bg-primary-light text-primary',
+  default: 'border border-border bg-bg text-text-base',
+  success: 'border border-green-200 bg-green-50 text-success',
+  warning: 'border border-amber-200 bg-amber-50 text-warning',
+  danger: 'border border-red-200 bg-danger-bg text-danger',
+  info: 'border border-blue-200 bg-primary-light text-primary',
 }
 
 const Badge = React.forwardRef<HTMLSpanElement, BadgeProps>(
   ({ variant = 'default', className, children, ...props }, ref) => (
     <span
       ref={ref}
-      className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${badgeVariants[variant]} ${className || ''}`}
+      className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${badgeVariants[variant]} ${className || ''}`}
       {...props}
     >
       {children}

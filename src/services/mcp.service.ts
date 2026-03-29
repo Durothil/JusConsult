@@ -4,6 +4,7 @@
  */
 
 import axios from 'axios'
+import { supabase } from './supabase'
 
 const BACKEND_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001'
 const API_SECRET = import.meta.env.VITE_API_SECRET
@@ -24,7 +25,12 @@ async function callBackendAPI(endpoint: string, data: Record<string, unknown> = 
   try {
     if (import.meta.env.DEV) console.log(`📞 Chamando endpoint: ${endpoint}`)
 
-    const response = await backendClient.post(endpoint, data)
+    const session = await supabase?.auth.getSession()
+    const accessToken = session?.data?.session?.access_token
+
+    const response = await backendClient.post(endpoint, data, {
+      headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
+    })
 
     // mcpError é um campo de aviso (não falha crítica) – repassa para o caller
     if (response.data.mcpError) {

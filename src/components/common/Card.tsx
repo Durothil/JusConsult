@@ -9,7 +9,7 @@ const Card = React.forwardRef<HTMLDivElement, CardProps>(
   ({ className, children, ...props }, ref) => (
     <div
       ref={ref}
-      className={`bg-surface rounded-lg border border-border ${className || ''}`}
+      className={`overflow-hidden rounded-2xl border border-border bg-surface shadow-sm ${className || ''}`}
       {...props}
     >
       {children}
@@ -25,7 +25,7 @@ export const CardHeader: React.FC<{ children: React.ReactNode; className?: strin
   children,
   className,
 }) => (
-  <div className={`px-5 py-3.5 border-b border-border-subtle ${className || ''}`}>
+  <div className={`border-b border-border-subtle px-5 py-4 ${className || ''}`}>
     {children}
   </div>
 )
@@ -33,13 +33,13 @@ export const CardHeader: React.FC<{ children: React.ReactNode; className?: strin
 export const CardContent: React.FC<{ children: React.ReactNode; className?: string }> = ({
   children,
   className,
-}) => <div className={`px-5 py-4 ${className || ''}`}>{children}</div>
+}) => <div className={`px-5 py-5 ${className || ''}`}>{children}</div>
 
 export const CardFooter: React.FC<{ children: React.ReactNode; className?: string }> = ({
   children,
   className,
 }) => (
-  <div className={`px-5 py-3.5 border-t border-border-subtle bg-bg ${className || ''}`}>
+  <div className={`border-t border-border-subtle bg-bg px-5 py-4 ${className || ''}`}>
     {children}
   </div>
 )
