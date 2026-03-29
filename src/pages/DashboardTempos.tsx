@@ -113,6 +113,7 @@ const DashboardTempos: React.FC = () => {
   const [filtroResumo, setFiltroResumo] = useState<FiltroResumo>('todos')
   const [modalOpen, setModalOpen] = useState(false)
   const [processoSelecionado, setProcessoSelecionado] = useState<EscritorioProcesso | null>(null)
+  const [faseAtual, setFaseAtual] = useState<string | null>(null)
 
   const carregar = useCallback(async (p: Periodo) => {
     setLoading(true)
@@ -144,10 +145,11 @@ const DashboardTempos: React.FC = () => {
     }
   }, [carregar, periodo])
 
-  const handleAbrirProcesso = useCallback(async (cnj: string) => {
+  const handleAbrirProcesso = useCallback(async (cnj: string, faseAtualDaTabela?: string) => {
     try {
       const processo = await verificarCadastro(cnj)
       setProcessoSelecionado(processo)
+      setFaseAtual(faseAtualDaTabela || null)
       setModalOpen(true)
     } catch {
       navigate(`/process/${encodeURIComponent(cnj)}`)
@@ -307,7 +309,7 @@ const DashboardTempos: React.FC = () => {
                             <td className="px-4 py-3 text-gray-700">{formatDias(processo.tempoTotalDias)}</td>
                             <td className="px-4 py-3 text-gray-700">{formatDate(processo.ultimaMovimentacaoData)}</td>
                             <td className="px-4 py-3 space-x-2 flex">
-                              <Button variant="secondary" size="sm" onClick={() => handleAbrirProcesso(processo.cnj)}>
+                              <Button variant="secondary" size="sm" onClick={() => handleAbrirProcesso(processo.cnj, processo.fase)}>
                                 Editar Fase
                               </Button>
                               <Button variant="secondary" size="sm" onClick={() => handleVerProcesso(processo.cnj)}>
@@ -448,6 +450,7 @@ const DashboardTempos: React.FC = () => {
           carregar(periodo)
         }}
         processo={processoSelecionado}
+        faseAtual={faseAtual}
       />
     </div>
   )

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import Button from '@/components/common/Button'
-import { atualizarProcesso } from '@/services/escritorio.service'
+import { atualizarProcesso, verificarCadastro } from '@/services/escritorio.service'
 import type { FaseProcessual, EscritorioProcesso } from '@/types/escritorio'
 
 interface Props {
@@ -8,6 +8,7 @@ interface Props {
   onClose: () => void
   onSuccess: () => void
   processo: EscritorioProcesso | null
+  faseAtual?: string | null
 }
 
 const FASE_OPTIONS: { value: FaseProcessual; label: string }[] = [
@@ -18,17 +19,38 @@ const FASE_OPTIONS: { value: FaseProcessual; label: string }[] = [
   { value: 'ARQUIVADO', label: 'Arquivado' },
 ]
 
-export function EditarFaseModal({ isOpen, onClose, onSuccess, processo }: Props) {
-  const [fase, setFase] = useState<FaseProcessual | undefined>(processo?.faseProcessual)
+// Mapear fases de entrada (ex: "Sentenciado") para valores internos (ex: "SENTENCIADO")
+const FASE_MAPPING: Record<string, FaseProcessual> = {
+  'Conhecimento': 'CONHECIMENTO',
+  'Sentenciado': 'SENTENCIADO',
+  'Liquidação / Execução': 'LIQUIDACAO_EXECUCAO',
+  'Aguardando RPV': 'AGUARDANDO_RPV',
+  'Arquivado': 'ARQUIVADO',
+}
+
+export function EditarFaseModal({ isOpen, onClose, onSuccess, processo, faseAtual }: Props) {
+  const [fase, setFase] = useState<FaseProcessual | undefined>()
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState<string | null>(null)
 
   useEffect(() => {
     if (isOpen && processo) {
-      setFase(processo.faseProcessual)
+      let faseDetectada: FaseProcessual | undefined
+
+      // Prioridade 1: usar faseAtual passada como prop
+      if (faseAtual) {
+        faseDetectada = FASE_MAPPING[faseAtual] || (faseAtual as FaseProcessual)
+      }
+      // Prioridade 2: usar faseProcessual do processo
+      else if (processo.faseProcessual) {
+        const faseStr = String(processo.faseProcessual)
+        faseDetectada = FASE_MAPPING[faseStr] || (faseStr as FaseProcessual)
+      }
+
+      setFase(faseDetectada)
       setErro(null)
     }
-  }, [isOpen, processo])
+  }, [isOpen, processo, faseAtual])
 
   const handleSalvar = async () => {
     if (!processo || !fase) return
