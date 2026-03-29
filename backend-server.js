@@ -1559,15 +1559,12 @@ app.post('/api/escritorio/monitorar/:cnj', mcpLimiter, async (req, res) => {
           else if (alerta) alertasCriados.push(alerta);
         }
 
-        try {
-          await createMovementApprovalDraft({
-            registro,
-            cnj,
-            movimento: movimentosNovos[0],
-          });
-        } catch (notifyErr) {
-          console.warn('?????? Erro ao preparar mensagem para aprovacao humana:', notifyErr.message);
-        }
+        const draft = await createMovementApprovalDraft({
+          registro,
+          cnj,
+          movimento: movimentosNovos[0],
+        });
+        // draft será null se cliente não existir ou não tiver WhatsApp — ignorar silenciosamente
 
         // Atualiza último hash e data de verificação
         const { error: updateHashError } = await supabase
@@ -1580,16 +1577,13 @@ app.post('/api/escritorio/monitorar/:cnj', mcpLimiter, async (req, res) => {
         if (updateHashError) console.warn('⚠️ Erro ao atualizar hash:', updateHashError.message);
       } else {
         // Sem novidades — só atualiza data de verificação
-        try {
-          if (shouldSendQuarterlyStatus(registro.last_client_notification_at)) {
-            await createQuarterlyApprovalDraft({
-              registro,
-              cnj,
-              movimento: movimentos[0] || null,
-            });
-          }
-        } catch (notifyErr) {
-          console.warn('?????? Erro ao preparar atualizacao trimestral para aprovacao humana:', notifyErr.message);
+        if (shouldSendQuarterlyStatus(registro.last_client_notification_at)) {
+          const draft = await createQuarterlyApprovalDraft({
+            registro,
+            cnj,
+            movimento: movimentos[0] || null,
+          });
+          // draft será null se cliente não existir ou não tiver WhatsApp — ignorar silenciosamente
         }
         const { error: updateVerifError } = await supabase
           .from('escritorio_processos')
@@ -1657,29 +1651,23 @@ app.post('/api/escritorio/monitorar', async (req, res) => {
         if (reg.ultimo_hash_movimento !== hashNovo) {
           const descricao = `Novo movimento: ${(movimentos[0].descricao || '').slice(0, 200)}`;
           await supabase.from('escritorio_alertas').insert({ cnj, tipo: 'NOVO_MOVIMENTO', descricao });
-          try {
-            await createMovementApprovalDraft({
-              registro: reg,
-              cnj,
-              movimento: movimentos[0],
-            });
-          } catch (notifyErr) {
-            console.warn(`?????? Erro ao preparar mensagem para aprovacao humana em ${cnj}:`, notifyErr.message);
-          }
+          const draft = await createMovementApprovalDraft({
+            registro: reg,
+            cnj,
+            movimento: movimentos[0],
+          });
+          // draft será null se cliente não existir ou não tiver WhatsApp
           await supabase.from('escritorio_processos')
             .update({ ultimo_hash_movimento: hashNovo, ultima_verificacao: new Date().toISOString() })
             .eq('cnj', cnj);
         } else {
-          try {
-            if (shouldSendQuarterlyStatus(reg.last_client_notification_at)) {
-              await createQuarterlyApprovalDraft({
-                registro: reg,
-                cnj,
-                movimento: movimentos[0] || null,
-              });
-            }
-          } catch (notifyErr) {
-            console.warn(`?????? Erro ao preparar atualizacao trimestral para aprovacao humana em ${cnj}:`, notifyErr.message);
+          if (shouldSendQuarterlyStatus(reg.last_client_notification_at)) {
+            const draft = await createQuarterlyApprovalDraft({
+              registro: reg,
+              cnj,
+              movimento: movimentos[0] || null,
+            });
+            // draft será null se cliente não existir ou não tiver WhatsApp
           }
           await supabase.from('escritorio_processos')
             .update({ ultima_verificacao: new Date().toISOString() }).eq('cnj', cnj);
@@ -3232,13 +3220,16 @@ async function explainDocumentForClient({ clienteNome, cnj, documento }) {
 async function createMovementApprovalDraft({ registro, cnj, movimento, manual = false }) {
   const cliente = await findClientForProcess(registro)
   if (!cliente) {
-    throw new Error('Nenhum cliente vinculado foi encontrado para este processo.')
+    // Silenciar — alguns processos podem não ter cliente vinculado (esperado)
+    return null
   }
   if (!cliente?.whatsapp) {
-    throw new Error(`O cliente ${cliente.nome} esta sem WhatsApp cadastrado.`)
+    // Silenciar — cliente sem WhatsApp é situação comum
+    return null
   }
   if (!manual && !(await isMovementWorthNotifying(`${movimento?.tipo || ''} ${movimento?.descricao || ''}`))) {
-    throw new Error('Essa movimentacao nao esta habilitada para notificacao ao cliente.')
+    // Silenciar — movimentação não habilitada para notificação
+    return null
   }
 
   // Usa hash_unico como fingerprint estável. Nunca usa movimento.id pois
@@ -3269,10 +3260,10 @@ async function createMovementApprovalDraft({ registro, cnj, movimento, manual = 
 async function createDocumentApprovalDraft({ registro, cnj, documento }) {
   const cliente = await findClientForProcess(registro)
   if (!cliente) {
-    throw new Error('Nenhum cliente vinculado foi encontrado para este processo.')
+    return null
   }
   if (!cliente?.whatsapp) {
-    throw new Error(`O cliente ${cliente.nome} esta sem WhatsApp cadastrado.`)
+    return null
   }
 
   const draftMessage = await explainDocumentForClient({
@@ -3362,10 +3353,10 @@ async function explainQuarterlyStatusForClient({ clienteNome, cnj, movimento }) 
 async function createQuarterlyApprovalDraft({ registro, cnj, movimento }) {
   const cliente = await findClientForProcess(registro)
   if (!cliente) {
-    throw new Error('Nenhum cliente vinculado foi encontrado para este processo.')
+    return null
   }
   if (!cliente?.whatsapp) {
-    throw new Error(`O cliente ${cliente.nome} esta sem WhatsApp cadastrado.`)
+    return null
   }
 
   const draftMessage = await explainQuarterlyStatusForClient({
