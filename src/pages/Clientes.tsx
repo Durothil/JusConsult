@@ -5,6 +5,7 @@ import Card, { CardContent } from '@/components/common/Card'
 import Empty from '@/components/common/Empty'
 import { Spinner } from '@/components/common/Loading'
 import { CadastroClienteModal } from '@/components/process/CadastroClienteModal'
+import { ContratosZapsign } from '@/components/clientes/ContratosZapsign'
 import { listarClientes, removerCliente, cadastrarCliente } from '@/services/cliente.service'
 import { parseCsv, readFileText, normalizeHeader } from '@/utils/csv'
 import type { Cliente } from '@/types/cliente'
@@ -27,6 +28,7 @@ export default function Clientes() {
   const [editando, setEditando] = useState<Cliente | undefined>()
   const [confirmandoId, setConfirmandoId] = useState<string | null>(null)
   const [importando, setImportando] = useState(false)
+  const [clienteExpandidoId, setClienteExpandidoId] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const { toasts, showToast: addToast } = useToast()
 
@@ -236,50 +238,66 @@ export default function Clientes() {
                 </thead>
                 <tbody className="divide-y divide-gray-100 bg-white">
                   {clientesFiltrados.map(c => (
-                    <tr key={c.id} className="transition-colors hover:bg-gray-50">
-                      <td className="px-4 py-3 text-sm font-medium text-gray-900">{c.nome}</td>
-                      <td className="px-4 py-3 font-mono text-sm text-gray-600">{c.cpfCnpj || '-'}</td>
-                      <td className="px-4 py-3 text-sm text-gray-600">{c.whatsapp || '-'}</td>
-                      <td className="px-4 py-3 text-sm text-gray-600">{c.email || '-'}</td>
-                      <td className="px-4 py-3 text-right">
-                        {confirmandoId === c.id ? (
-                          <span className="inline-flex items-center gap-2">
-                            <span className="text-sm text-gray-700">Confirmar?</span>
-                            <Button
-                              variant="danger"
-                              size="sm"
-                              onClick={() => handleExcluir(c.id)}
-                            >
-                              Sim
-                            </Button>
-                            <Button
-                              variant="secondary"
-                              size="sm"
-                              onClick={() => setConfirmandoId(null)}
-                            >
-                              Não
-                            </Button>
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-2">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => { setEditando(c); setModalOpen(true) }}
-                            >
-                              Editar
-                            </Button>
-                            <Button
-                              variant="danger"
-                              size="sm"
-                              onClick={() => setConfirmandoId(c.id)}
-                            >
-                              Excluir
-                            </Button>
-                          </span>
-                        )}
-                      </td>
-                    </tr>
+                    <>
+                      <tr
+                        key={c.id}
+                        className="transition-colors hover:bg-gray-50 cursor-pointer"
+                        onClick={() => setClienteExpandidoId(prev => prev === c.id ? null : c.id)}
+                      >
+                        <td className="px-4 py-3 text-sm font-medium text-gray-900">{c.nome}</td>
+                        <td className="px-4 py-3 font-mono text-sm text-gray-600">{c.cpfCnpj || '-'}</td>
+                        <td className="px-4 py-3 text-sm text-gray-600">{c.whatsapp || '-'}</td>
+                        <td className="px-4 py-3 text-sm text-gray-600">{c.email || '-'}</td>
+                        <td className="px-4 py-3 text-right" onClick={e => e.stopPropagation()}>
+                          {confirmandoId === c.id ? (
+                            <span className="inline-flex items-center gap-2">
+                              <span className="text-sm text-gray-700">Confirmar?</span>
+                              <Button
+                                variant="danger"
+                                size="sm"
+                                onClick={() => handleExcluir(c.id)}
+                              >
+                                Sim
+                              </Button>
+                              <Button
+                                variant="secondary"
+                                size="sm"
+                                onClick={() => setConfirmandoId(null)}
+                              >
+                                Não
+                              </Button>
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-2">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => { setEditando(c); setModalOpen(true) }}
+                              >
+                                Editar
+                              </Button>
+                              <Button
+                                variant="danger"
+                                size="sm"
+                                onClick={() => setConfirmandoId(c.id)}
+                              >
+                                Excluir
+                              </Button>
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                      {clienteExpandidoId === c.id && (
+                        <tr key={`${c.id}-contratos`}>
+                          <td colSpan={5} className="bg-slate-50 px-6 pb-4 pt-0">
+                            <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                              Contratos ZapSign
+                            </p>
+                            <ContratosZapsign clienteId={c.id} />
+                          </td>
+                        </tr>
+                      )}
+                    </>
                   ))}
                 </tbody>
               </table>

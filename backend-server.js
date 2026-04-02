@@ -110,7 +110,10 @@ app.use('/api', generalLimiter);
 const API_SECRET = process.env.API_SECRET;
 if (API_SECRET) {
   app.use('/api', (req, res, next) => {
-    if (req.path === '/health') return next(); // health check público
+    if (req.path === '/health') return next();
+    if (req.path.startsWith('/financeiro/webhooks')) return next(); // webhooks públicos
+    if (req.path.startsWith('/zapsign/webhooks')) return next(); // webhooks públicos
+    console.log('[auth] path:', req.path, '| key:', req.headers['x-api-key'] ? 'presente' : 'ausente')
     const key = req.headers['x-api-key'];
     if (key !== API_SECRET) {
       return res.status(401).json({ error: 'Não autorizado' });
@@ -3983,6 +3986,508 @@ app.delete('/api/settings/:key', generalLimiter, async (req, res) => {
   }
   return res.status(204).send()
 })
+
+// ─── Demandas configuráveis ───────────────────────────────────────────────────
+
+// GET /api/demandas — retorna lista de demandas configuradas
+app.get('/api/demandas', generalLimiter, async (req, res) => {
+  try {
+    const { data } = await supabase
+      .from('settings')
+      .select('value')
+      .eq('key', 'demandas_lista')
+      .maybeSingle()
+
+    const defaults = [
+      'auxílio-doença',
+      'auxílio-acidente',
+      'aposentadoria por invalidez',
+      'BPC/LOAS',
+      'pensão por morte',
+      'salário-maternidade'
+    ]
+
+    if (!data) return res.json(defaults)
+
+    try {
+      return res.json(JSON.parse(data.value))
+    } catch {
+      return res.json(defaults)
+    }
+  } catch (err) {
+    console.error('[demandas] Erro ao buscar:', err.message)
+    res.status(500).json({ error: 'Erro interno ao processar operação.' })
+  }
+})
+
+// PUT /api/demandas — salva lista de demandas
+app.put('/api/demandas', generalLimiter, async (req, res) => {
+  const { demandas } = req.body
+  if (!Array.isArray(demandas) || demandas.length === 0) {
+    return res.status(400).json({ error: 'Campo demandas deve ser um array não vazio.' })
+  }
+  // Sanitizar: apenas strings não vazias
+  const lista = demandas.map(d => String(d).trim()).filter(Boolean)
+  try {
+    const { error } = await supabase
+      .from('settings')
+      .upsert({ key: 'demandas_lista', value: JSON.stringify(lista) }, { onConflict: 'key' })
+    if (error) {
+      console.error('[demandas] Erro ao salvar:', error.message)
+      return res.status(500).json({ error: 'Erro interno ao processar operação.' })
+    }
+    res.json(lista)
+  } catch (err) {
+    console.error('[demandas] Erro inesperado:', err.message)
+    res.status(500).json({ error: 'Erro interno ao processar operação.' })
+  }
+})
+
+// ─── Zapsign ──────────────────────────────────────────────────────────────────
+
+// POST /api/zapsign/webhooks — recebe webhook de contrato assinado no Zapsign
+app.post('/api/zapsign/webhooks', async (req, res) => {
+  const body = req.body
+
+  // Parsear formato real do ZapSign
+  const doc_id = body.token
+  const tipo_contrato = body.name || 'Contrato'
+  const url_assinado = body.signed_file || null
+  const event_type = body.event_type || ''
+
+  // Usar signer_who_signed (quem acabou de assinar) ou primeiro signer
+  const signer = body.signer_who_signed || (body.signers && body.signers[0]) || {}
+  const signatario_nome = signer.name || ''
+  const signatario_email = signer.email || null
+  const signatario_telefone = signer.phone_number || null
+  const signatario_cpf = signer.cpf || null
+  const data_assinatura = signer.signed_at || body.last_update_at || new Date().toISOString()
+
+  // Aceitar apenas evento de documento assinado
+  if (event_type && event_type !== 'doc_signed') {
+    return res.status(200).json({ message: 'Evento ignorado', event_type })
+  }
+
+  if (!doc_id || !signatario_nome) {
+    return res.status(400).json({ error: 'Payload inválido: token e signer.name são obrigatórios' })
+  }
+
+  try {
+    // Idempotência: checar se doc_id já existe
+    const { data: existing } = await supabase
+      .from('zapsign_contratos')
+      .select('id')
+      .eq('zapsign_doc_id', doc_id)
+      .maybeSingle()
+    if (existing) {
+      return res.status(202).json({ message: 'Contrato já processado', id: existing.id })
+    }
+
+    // Buscar ou criar cliente
+    let clienteId = null
+    let clienteObj = null
+    if (signatario_email || signatario_telefone) {
+      const query = supabase.from('clientes').select('*')
+      if (signatario_email) query.eq('email', signatario_email)
+      const { data: found } = await query.maybeSingle()
+      if (found) {
+        clienteId = found.id
+        clienteObj = found
+      } else {
+        // Criar novo cliente
+        const { data: novo, error: errCliente } = await supabase
+          .from('clientes')
+          .insert({
+            nome: signatario_nome,
+            email: signatario_email || null,
+            whatsapp: signatario_telefone || null,
+            cpf_cnpj: signatario_cpf || null,
+            origem: 'zapsign'
+          })
+          .select()
+          .single()
+        if (errCliente) {
+          console.error('[zapsign] Erro ao criar cliente:', errCliente.message)
+          return res.status(500).json({ error: 'Erro ao criar cliente' })
+        }
+        clienteId = novo.id
+        clienteObj = novo
+      }
+    }
+
+    if (!clienteId) {
+      return res.status(400).json({ error: 'Email ou telefone do signatário é obrigatório para identificar o cliente' })
+    }
+
+    // Salvar contrato
+    const { data: contrato, error: errContrato } = await supabase
+      .from('zapsign_contratos')
+      .insert({
+        cliente_id: clienteId,
+        zapsign_doc_id: doc_id,
+        tipo_contrato,
+        signatario_nome,
+        signatario_email: signatario_email || null,
+        signatario_telefone: signatario_telefone || null,
+        signatario_cpf_cnpj: signatario_cpf || null,
+        url_contrato_assinado: url_assinado || null,
+        data_assinatura,
+        status_zapsign: 'SIGNED',
+        payload_json: req.body
+      })
+      .select()
+      .single()
+
+    if (errContrato) {
+      console.error('[zapsign] Erro ao salvar contrato:', errContrato.message)
+      return res.status(500).json({ error: 'Erro ao salvar contrato' })
+    }
+
+    // Notificação WhatsApp (fire-and-forget)
+    if (clienteObj?.whatsapp) {
+      const dataFormatada = new Date(data_assinatura).toLocaleDateString('pt-BR')
+      sendManualChatwootMessage({
+        nome: clienteObj.nome,
+        whatsapp: clienteObj.whatsapp,
+        mensagem: `Contrato assinado em ${dataFormatada}\nTipo: ${tipo_contrato}\nDocumento Zapsign processado com sucesso.`
+      }).catch(e => console.error('[zapsign] Erro notificação WhatsApp:', e.message))
+    }
+
+    return res.status(202).json({ message: 'Webhook processado', contratoId: contrato.id, clienteId })
+  } catch (err) {
+    console.error('[zapsign] Erro inesperado:', err.message)
+    return res.status(500).json({ error: 'Erro interno ao processar webhook' })
+  }
+})
+
+// GET /api/zapsign/contratos/:clienteId — lista contratos de um cliente
+app.get('/api/zapsign/contratos/:clienteId', generalLimiter, async (req, res) => {
+  const { clienteId } = req.params
+  try {
+    const { data, error } = await supabase
+      .from('zapsign_contratos')
+      .select('*')
+      .eq('cliente_id', clienteId)
+      .order('data_assinatura', { ascending: false })
+
+    if (error) {
+      console.error('[zapsign] Erro ao buscar contratos:', error.message)
+      return res.status(500).json({ error: 'Erro interno ao processar operação.' })
+    }
+
+    res.json(data || [])
+  } catch (err) {
+    console.error('[zapsign] Erro inesperado ao buscar contratos:', err.message)
+    res.status(500).json({ error: 'Erro interno ao processar operação.' })
+  }
+})
+
+// GET /api/clientes-fechados — lista contratos assinados agrupados por mês
+app.get('/api/clientes-fechados', generalLimiter, async (req, res) => {
+  const ano = parseInt(req.query.ano, 10) || new Date().getFullYear()
+  try {
+    const { data, error } = await supabase
+      .from('zapsign_contratos')
+      .select(`
+        id,
+        cliente_id,
+        signatario_telefone,
+        demanda,
+        fase,
+        data_assinatura,
+        valor_contrato,
+        pagamento_inicial,
+        boleto_emitido,
+        observacoes,
+        clientes ( id, nome, codigo )
+      `)
+      .gte('data_assinatura', `${ano}-01-01T00:00:00.000Z`)
+      .lt('data_assinatura', `${ano + 1}-01-01T00:00:00.000Z`)
+      .order('data_assinatura', { ascending: false })
+
+    if (error) {
+      console.error('[clientes-fechados] Erro ao buscar contratos:', error.message)
+      return res.status(500).json({ error: 'Erro interno ao processar operação.' })
+    }
+
+    const registros = (data || []).map(row => {
+      const cliente = row.clientes || {}
+      return {
+        id: row.id,
+        cliente_id: row.cliente_id,
+        cod_cliente: cliente.codigo || null,
+        nome: cliente.nome || null,
+        contato: row.signatario_telefone || null,
+        demanda: row.demanda || null,
+        fase: row.fase || null,
+        data_assinatura: row.data_assinatura,
+        valor_contrato: row.valor_contrato != null ? Number(row.valor_contrato) : null,
+        pagamento_inicial: row.pagamento_inicial || false,
+        boleto_emitido: row.boleto_emitido || false,
+        observacoes: row.observacoes || ''
+      }
+    })
+
+    // Agrupar por mês (YYYY-MM)
+    const porMes = {}
+    for (const r of registros) {
+      const mesKey = r.data_assinatura ? r.data_assinatura.substring(0, 7) : 'desconhecido'
+      if (!porMes[mesKey]) porMes[mesKey] = { contratos: [], valor_total: 0 }
+      porMes[mesKey].contratos.push(r)
+      if (r.valor_contrato != null) porMes[mesKey].valor_total += r.valor_contrato
+    }
+
+    const MESES_PT = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro']
+    const meses = Object.keys(porMes)
+      .sort((a, b) => b.localeCompare(a))
+      .map(mesKey => {
+        const [anoStr, mesStr] = mesKey.split('-')
+        const mesIdx = parseInt(mesStr, 10) - 1
+        const label = (mesIdx >= 0 && mesIdx < 12)
+          ? `${MESES_PT[mesIdx]} ${anoStr}`
+          : mesKey
+        return {
+          mes: mesKey,
+          label,
+          total: porMes[mesKey].contratos.length,
+          valor_total: Math.round(porMes[mesKey].valor_total * 100) / 100,
+          contratos: porMes[mesKey].contratos
+        }
+      })
+
+    const totalAno = registros.length
+    const valorTotalAno = registros.reduce((acc, r) => acc + (r.valor_contrato || 0), 0)
+
+    const agora = new Date()
+    const anoAtual = agora.getFullYear()
+    const mesAtualNum = agora.getMonth() + 1
+    const mesAtualKey = `${anoAtual}-${String(mesAtualNum).padStart(2, '0')}`
+
+    const contratosMesAtual = (porMes[mesAtualKey]?.contratos || [])
+    const esteMes = contratosMesAtual.length
+    const valorTotalMes = Math.round(contratosMesAtual.reduce((acc, r) => acc + (r.valor_contrato || 0), 0) * 100) / 100
+
+    const mesesComDados = Object.keys(porMes).length
+    const mediaMes = mesesComDados > 0 ? Math.round((totalAno / mesesComDados) * 10) / 10 : 0
+
+    return res.json({
+      totais: {
+        total_ano: totalAno,
+        este_mes: esteMes,
+        media_mes: mediaMes,
+        valor_total_ano: Math.round(valorTotalAno * 100) / 100,
+        valor_total_mes: valorTotalMes
+      },
+      meses
+    })
+  } catch (err) {
+    console.error('[clientes-fechados] Erro inesperado:', err.message)
+    return res.status(500).json({ error: 'Erro interno ao processar operação.' })
+  }
+})
+
+// PUT /api/zapsign/contratos/:id — atualiza campos de fechamento
+app.put('/api/zapsign/contratos/:id', generalLimiter, async (req, res) => {
+  const { id } = req.params
+  const { demanda, fase, valor_contrato, pagamento_inicial, boleto_emitido, observacoes, status_operacional } = req.body
+
+  const CAMPOS = { demanda, fase, valor_contrato, pagamento_inicial, boleto_emitido, observacoes, status_operacional }
+  const atualizacoes = {}
+  for (const [k, v] of Object.entries(CAMPOS)) {
+    if (v !== undefined) atualizacoes[k] = v
+  }
+
+  if (Object.keys(atualizacoes).length === 0) {
+    return res.status(400).json({ error: 'Nenhum campo para atualizar foi enviado.' })
+  }
+
+  atualizacoes.updated_at = new Date().toISOString()
+
+  try {
+    const { data, error } = await supabase
+      .from('zapsign_contratos')
+      .update(atualizacoes)
+      .eq('id', id)
+      .select()
+      .single()
+
+    if (error) {
+      console.error('[zapsign] Erro ao atualizar contrato:', error.message)
+      return res.status(500).json({ error: 'Erro interno ao processar operação.' })
+    }
+    if (!data) {
+      return res.status(404).json({ error: 'Contrato não encontrado.' })
+    }
+
+    return res.json(data)
+  } catch (err) {
+    console.error('[zapsign] Erro inesperado ao atualizar contrato:', err.message)
+    return res.status(500).json({ error: 'Erro interno ao processar operação.' })
+  }
+})
+
+// POST /api/zapsign/contratos/:id/emitir-boleto — cria cobrança Asaas para contrato
+app.post('/api/zapsign/contratos/:id/emitir-boleto', generalLimiter, async (req, res) => {
+  const { id } = req.params
+  try {
+    // Buscar contrato
+    const { data: contrato, error: errContrato } = await supabase
+      .from('zapsign_contratos')
+      .select('*, clientes(*)')
+      .eq('id', id)
+      .single()
+
+    if (errContrato || !contrato) {
+      return res.status(404).json({ error: 'Contrato não encontrado.' })
+    }
+
+    // Idempotência
+    if (contrato.boleto_emitido) {
+      return res.status(200).json({ message: 'Boleto já emitido para este contrato.' })
+    }
+
+    // Validações
+    if (!contrato.pagamento_inicial) {
+      return res.status(400).json({ error: 'Pagamento inicial ainda não confirmado para este contrato.' })
+    }
+    if (!contrato.valor_contrato) {
+      return res.status(400).json({ error: 'Valor do contrato não preenchido. Preencha antes de emitir boleto.' })
+    }
+
+    // Sincronizar cliente no Asaas (busca ou cria customer)
+    const mapping = await syncClienteAsaasById(contrato.cliente_id)
+
+    // Calcular vencimento: hoje + 3 dias úteis (simplificado: +3 dias corridos, excluindo fim de semana)
+    const hoje = new Date()
+    let diasAdicionados = 0
+    let vencimento = new Date(hoje)
+    while (diasAdicionados < 3) {
+      vencimento.setDate(vencimento.getDate() + 1)
+      const dow = vencimento.getDay()
+      if (dow !== 0 && dow !== 6) diasAdicionados++
+    }
+    const vencimentoStr = vencimento.toISOString().substring(0, 10)
+
+    const config = await resolveAsaasConfig()
+    const charge = await asaasRequest(config, '/payments', {
+      method: 'POST',
+      body: {
+        customer: mapping.gatewayCustomerId,
+        billingType: 'BOLETO',
+        value: contrato.valor_contrato,
+        dueDate: vencimentoStr,
+        description: `Pagamento inicial — ${contrato.demanda || contrato.tipo_contrato || 'contrato'}`
+      }
+    })
+
+    // Marcar boleto como emitido
+    await supabase
+      .from('zapsign_contratos')
+      .update({ boleto_emitido: true, updated_at: new Date().toISOString() })
+      .eq('id', id)
+
+    return res.status(201).json({
+      boleto_url: charge.bankSlipUrl || charge.invoiceUrl || null,
+      boleto_id: charge.id,
+      vencimento: vencimentoStr
+    })
+  } catch (err) {
+    if (err.statusCode === 404) {
+      return res.status(404).json({ error: 'Cliente não encontrado para geração do boleto.' })
+    }
+    console.error('[zapsign] Erro ao emitir boleto:', err.message)
+    return res.status(502).json({ error: 'Erro ao comunicar com o gateway de pagamento. Tente novamente.' })
+  }
+})
+
+// POST /api/zapsign/contratos/manual — lançamento manual de contrato fechado
+app.post('/api/zapsign/contratos/manual', generalLimiter, async (req, res) => {
+  const {
+    cliente_id,
+    // dados de novo cliente (se cliente_id não for fornecido)
+    novo_cliente_nome,
+    novo_cliente_whatsapp,
+    novo_cliente_email,
+    novo_cliente_cpf_cnpj,
+    // campos do contrato
+    demanda,
+    fase,
+    data_assinatura,
+    valor_contrato,
+    observacoes
+  } = req.body
+
+  if (!demanda || !fase || !data_assinatura) {
+    return res.status(400).json({ error: 'Campos obrigatórios: demanda, fase, data_assinatura.' })
+  }
+
+  try {
+    let clienteId = cliente_id
+
+    // Se não veio cliente_id, criar novo cliente
+    if (!clienteId) {
+      if (!novo_cliente_nome) {
+        return res.status(400).json({ error: 'Informe cliente_id ou novo_cliente_nome para criar cliente.' })
+      }
+      const { data: novo, error: errCliente } = await supabase
+        .from('clientes')
+        .insert({
+          nome: novo_cliente_nome,
+          whatsapp: novo_cliente_whatsapp || null,
+          email: novo_cliente_email || null,
+          cpf_cnpj: novo_cliente_cpf_cnpj || null,
+          origem: 'manual'
+        })
+        .select()
+        .single()
+      if (errCliente) {
+        console.error('[zapsign/manual] Erro ao criar cliente:', errCliente.message)
+        return res.status(500).json({ error: 'Erro interno ao processar operação.' })
+      }
+      clienteId = novo.id
+    }
+
+    // Buscar nome do signatário a partir do cliente
+    const { data: cliente } = await supabase
+      .from('clientes')
+      .select('nome, whatsapp')
+      .eq('id', clienteId)
+      .single()
+
+    // Gerar doc_id único para lançamento manual
+    const docId = `manual-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+
+    const { data: contrato, error: errContrato } = await supabase
+      .from('zapsign_contratos')
+      .insert({
+        cliente_id: clienteId,
+        zapsign_doc_id: docId,
+        tipo_contrato: demanda,
+        signatario_nome: cliente?.nome || '',
+        signatario_telefone: cliente?.whatsapp || null,
+        data_assinatura,
+        status_zapsign: 'MANUAL',
+        demanda,
+        fase,
+        valor_contrato: valor_contrato || null,
+        observacoes: observacoes || null
+      })
+      .select()
+      .single()
+
+    if (errContrato) {
+      console.error('[zapsign/manual] Erro ao criar contrato:', errContrato.message)
+      return res.status(500).json({ error: 'Erro interno ao processar operação.' })
+    }
+
+    res.status(201).json(contrato)
+  } catch (err) {
+    console.error('[zapsign/manual] Erro inesperado:', err.message)
+    res.status(500).json({ error: 'Erro interno ao processar operação.' })
+  }
+})
+
+// ─── Fim Zapsign ──────────────────────────────────────────────────────────────
 
 // Iniciar servidor
 const server = app.listen(PORT, () => {

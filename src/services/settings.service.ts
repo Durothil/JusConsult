@@ -13,6 +13,8 @@ export const SETTINGS_KEYS = [
   'asaasEnvironment',
   'asaasApiKey',
   'asaasWebhookToken',
+  'zapsignApiToken',
+  'zapsignWebhookSecret',
 ] as const
 
 export const SECRET_SETTINGS_KEYS = [
@@ -22,6 +24,8 @@ export const SECRET_SETTINGS_KEYS = [
   'chatwootApiToken',
   'asaasApiKey',
   'asaasWebhookToken',
+  'zapsignApiToken',
+  'zapsignWebhookSecret',
 ] as const
 
 export type SettingsKey = (typeof SETTINGS_KEYS)[number]
@@ -46,6 +50,8 @@ export interface AppSettings {
   asaasEnvironment?: string
   asaasApiKey?: string
   asaasWebhookToken?: string
+  zapsignApiToken?: string
+  zapsignWebhookSecret?: string
   secretMeta?: Partial<Record<SecretSettingsKey, SecretSettingMeta>>
 }
 
@@ -102,6 +108,8 @@ export async function getTokens(): Promise<AppSettings> {
       asaasEnvironment: values.asaasEnvironment,
       asaasApiKey: values.asaasApiKey,
       asaasWebhookToken: values.asaasWebhookToken,
+      zapsignApiToken: values.zapsignApiToken,
+      zapsignWebhookSecret: values.zapsignWebhookSecret,
       secretMeta,
     }
   } catch (error) {

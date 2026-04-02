@@ -67,6 +67,13 @@ const Icons = {
       <circle cx="7.5" cy="7.5" r="2"/><path d="M7.5 1.5v1.2M7.5 12.3v1.2M1.5 7.5h1.2M12.3 7.5h1.2M3.2 3.2l.85.85M10.95 10.95l.85.85M10.95 3.2l-.85.85M3.2 10.95l.85-.85"/>
     </svg>
   ),
+  userCheck: (
+    <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M6 8c1.657 0 3-1.343 3-3S7.657 2 6 2 3 3.343 3 5s1.343 3 3 3z"/>
+      <path d="M1 13c0-2.21 2.239-4 5-4"/>
+      <path d="M10 12l1.5 1.5L14 11"/>
+    </svg>
+  ),
   logout: (
     <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
       <path d="M6 2H3a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h3M10 10.5l3-3-3-3M13 7.5H6"/>
@@ -161,6 +168,7 @@ const Navigation: React.FC = () => {
         {navItem('/meus-processos', Icons.folder, 'Meus Processos', alertasCount)}
         {navItem('/diligencias', Icons.clock, 'Diligencias', urgentesCount)}
         {navItem('/clientes', Icons.users, 'Clientes')}
+        {navItem('/clientes-fechados', Icons.userCheck, 'Clientes Fechados')}
         {navItem('/comunicacao', Icons.message, 'Comunicacao', messagePendingCount)}
         {navItem('/financeiro', Icons.money, 'Financeiro')}
 

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Check, X } from 'lucide-react'
+import { Check, X, Plus } from 'lucide-react'
 import Card, { CardContent } from '@/components/common/Card'
 import Button from '@/components/common/Button'
 import { enviarMensagemTesteChatwoot } from '@/services/chatwoot.service'
@@ -10,6 +10,7 @@ import {
   type SecretSettingMeta,
   type SecretSettingsKey,
 } from '@/services/settings.service'
+import { getDemandas, salvarDemandas } from '@/services/clientesFechados.service'
 
 type ConfigState = {
   anthropicToken: string
@@ -24,6 +25,8 @@ type ConfigState = {
   asaasEnvironment: string
   asaasApiKey: string
   asaasWebhookToken: string
+  zapsignApiToken: string
+  zapsignWebhookSecret: string
 }
 
 type TestState = {
@@ -56,6 +59,8 @@ const EMPTY_STATE: ConfigState = {
   asaasEnvironment: 'sandbox',
   asaasApiKey: '',
   asaasWebhookToken: '',
+  zapsignApiToken: '',
+  zapsignWebhookSecret: '',
 }
 
 const EMPTY_TEST: TestState = {
@@ -71,6 +76,8 @@ const EMPTY_SECRET_META: Record<SecretSettingsKey, SecretSettingMeta> = {
   chatwootApiToken: { configured: false, isSecret: true },
   asaasApiKey: { configured: false, isSecret: true },
   asaasWebhookToken: { configured: false, isSecret: true },
+  zapsignApiToken: { configured: false, isSecret: true },
+  zapsignWebhookSecret: { configured: false, isSecret: true },
 }
 
 function normalizeWhatsappPreview(value: string) {
@@ -157,9 +164,15 @@ export default function Configuracoes() {
   const [saving, setSaving] = useState(false)
   const [sendingTest, setSendingTest] = useState(false)
   const [testMessage, setTestMessage] = useState<string | null>(null)
+  const [demandas, setDemandas] = useState<string[]>([])
+  const [novaDemanda, setNovaDemanda] = useState('')
+  const [salvandoDemandas, setSalvandoDemandas] = useState(false)
+  const [demandaMsg, setDemandaMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
 
   useEffect(() => {
     loadSettings()
+    const DEMANDAS_DEFAULT = ['auxílio-doença', 'auxílio-acidente', 'aposentadoria por invalidez', 'BPC/LOAS', 'pensão por morte', 'salário-maternidade']
+    getDemandas().then(setDemandas).catch(() => setDemandas(DEMANDAS_DEFAULT))
   }, [])
 
   const loadSettings = async () => {
@@ -180,6 +193,8 @@ export default function Configuracoes() {
         asaasEnvironment: loaded.asaasEnvironment || 'sandbox',
         asaasApiKey: '',
         asaasWebhookToken: '',
+        zapsignApiToken: '',
+        zapsignWebhookSecret: '',
       })
       setSecretMeta({
         ...EMPTY_SECRET_META,
@@ -448,6 +463,135 @@ export default function Configuracoes() {
           </div>
           <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
             Use um inbox do tipo API no Chatwoot. O contato precisa ter WhatsApp preenchido no cadastro do cliente para receber a mensagem.
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardContent className="space-y-5 py-5">
+          <div>
+            <h2 className="text-xl font-semibold text-gray-900">Demandas</h2>
+            <p className="text-sm text-gray-500">Lista de tipos de demanda disponíveis nos contratos de clientes fechados.</p>
+          </div>
+          {demandaMsg ? (
+            <div className={`rounded-lg border px-4 py-3 text-sm ${demandaMsg.type === 'success' ? 'border-green-200 bg-green-50 text-green-700' : 'border-red-200 bg-red-50 text-red-700'}`}>
+              {demandaMsg.text}
+            </div>
+          ) : null}
+          <div className="flex flex-col gap-2">
+            {demandas.map((d, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={d}
+                  onChange={e => {
+                    const nova = [...demandas]
+                    nova[i] = e.target.value
+                    setDemandas(nova)
+                  }}
+                  className="flex-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-1.5 text-sm text-gray-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <button
+                  type="button"
+                  onClick={() => setDemandas(prev => prev.filter((_, idx) => idx !== i))}
+                  className="text-gray-400 hover:text-red-500 transition-colors"
+                  title="Remover"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+            ))}
+            {demandas.length === 0 && (
+              <span className="text-sm text-gray-400">Nenhuma demanda cadastrada.</span>
+            )}
+          </div>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={novaDemanda}
+              onChange={e => setNovaDemanda(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  const v = novaDemanda.trim()
+                  if (v && !demandas.includes(v)) {
+                    setDemandas(prev => [...prev, v])
+                    setNovaDemanda('')
+                  }
+                }
+              }}
+              placeholder="Nova demanda..."
+              className="flex-1 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm text-gray-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            <button
+              type="button"
+              onClick={() => {
+                const v = novaDemanda.trim()
+                if (v && !demandas.includes(v)) {
+                  setDemandas(prev => [...prev, v])
+                  setNovaDemanda('')
+                }
+              }}
+              className="flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors shadow-sm"
+            >
+              <Plus size={16} /> Adicionar
+            </button>
+          </div>
+          <div className="flex justify-end">
+            <button
+              type="button"
+              disabled={salvandoDemandas}
+              onClick={async () => {
+                setSalvandoDemandas(true)
+                setDemandaMsg(null)
+                try {
+                  await salvarDemandas(demandas)
+                  setDemandaMsg({ type: 'success', text: 'Demandas salvas com sucesso.' })
+                  setTimeout(() => setDemandaMsg(null), 3000)
+                } catch {
+                  setDemandaMsg({ type: 'error', text: 'Erro ao salvar demandas.' })
+                } finally {
+                  setSalvandoDemandas(false)
+                }
+              }}
+              className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              {salvandoDemandas ? 'Salvando...' : 'Salvar demandas'}
+            </button>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardContent className="space-y-5 py-5">
+          <div>
+            <h2 className="text-xl font-semibold text-gray-900">Integracao ZapSign</h2>
+            <p className="text-sm text-gray-500">Token da API e secret do webhook para contratos digitais via ZapSign.</p>
+          </div>
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+            <InputRow
+              label="API Token do ZapSign"
+              value={settings.zapsignApiToken}
+              placeholder={secretMeta.zapsignApiToken.maskedValue || 'live_...'}
+              onChange={value => handleChange('zapsignApiToken', value)}
+              onClear={() => handleClear('zapsignApiToken')}
+              type="password"
+              configured={secretMeta.zapsignApiToken.configured}
+              helperText={buildSecretHelper(secretMeta.zapsignApiToken, settings.zapsignApiToken)}
+            />
+            <InputRow
+              label="Webhook Secret do ZapSign"
+              value={settings.zapsignWebhookSecret}
+              placeholder={secretMeta.zapsignWebhookSecret.maskedValue || 'secret-para-validar-hmac'}
+              onChange={value => handleChange('zapsignWebhookSecret', value)}
+              onClear={() => handleClear('zapsignWebhookSecret')}
+              type="password"
+              configured={secretMeta.zapsignWebhookSecret.configured}
+              helperText={buildSecretHelper(secretMeta.zapsignWebhookSecret, settings.zapsignWebhookSecret)}
+            />
+          </div>
+          <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+            O webhook secret e usado para validar a assinatura HMAC dos eventos recebidos do ZapSign. O API Token e necessario para enviar documentos.
           </div>
         </CardContent>
       </Card>
