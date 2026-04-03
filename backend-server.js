@@ -1840,9 +1840,9 @@ app.get('/api/escritorio/metricas-tempo', generalLimiter, async (req, res) => {
   try {
     const periodo = req.query.periodo || 'tudo'
 
-    // 1. CNJs monitorados
+    // 1. CNJs monitorados com cliente info
     const { data: eps, error: epsErr } = await supabase
-      .from('escritorio_processos').select('cnj')
+      .from('escritorio_processos').select('cnj, cliente_nome')
     if (epsErr) {
       console.error('metricas-tempo escritorio:', epsErr.message)
       return res.status(500).json({ error: 'Erro interno ao processar operação.' })
@@ -1858,7 +1858,12 @@ app.get('/api/escritorio/metricas-tempo', generalLimiter, async (req, res) => {
       })
     }
 
+    // Mapear CNJs com seus clientes
     const cnjs = eps.map(e => e.cnj)
+    const clienteMap = {}
+    for (const e of eps) {
+      clienteMap[e.cnj] = e.cliente_nome
+    }
 
     // Usar dados cacheados no Supabase — sem chamadas MCP ao vivo.
     // Busca processes + movements separadamente e faz join em memória.
@@ -2045,7 +2050,7 @@ app.get('/api/escritorio/metricas-tempo', generalLimiter, async (req, res) => {
       const tempoTotal = p.data_abertura ? diasEntre(p.data_abertura, ultimaMov.data) : null
       return {
         cnj: p.cnj,
-        clienteNome: p.clienteNome || p.cliente_nome || 'Cliente não informado',
+        clienteNome: clienteMap[p.cnj] || 'Cliente não informado',
         tribunal: p.tribunal,
         classe: p.classe,
         assunto: p.assunto,

@@ -74,7 +74,7 @@ function filtrarProcessos(processos: ProcessoTempoResumo[], filtro: FiltroResumo
     case 'conhecimento':
       return processos.filter(processo => processo.fase === 'Conhecimento')
     case 'rpv':
-      return processos.filter(processo => processo.aguardandoRpv)
+      return processos.filter(processo => processo.fase === 'Aguardando RPV')
     case 'arquivado':
       return processos.filter(processo => processo.fase === 'Arquivado')
     default:
