@@ -23,14 +23,14 @@ import type { MetricasTempo, ProcessoTempoResumo, EscritorioProcesso } from '@/t
 
 const FASE_COLOR: Record<string, string> = {
   Conhecimento: '#3b82f6',
-  Sentenciado: '#f59e0b',
+  'Fase de Recurso': '#f59e0b',
   'Liquidação / Execução': '#10b981',
   'Aguardando RPV': '#e11d48',
   Arquivado: '#6b7280',
 }
 
 type Periodo = '6m' | '1a' | 'tudo'
-type FiltroResumo = 'todos' | 'sentenca' | 'liquidacao' | 'conhecimento' | 'rpv' | 'arquivado'
+type FiltroResumo = 'todos' | 'recurso' | 'liquidacao' | 'conhecimento' | 'rpv' | 'arquivado'
 
 const PERIODO_LABEL: Record<Periodo, string> = {
   '6m': 'Últimos 6 meses',
@@ -67,8 +67,8 @@ function formatDate(value: string | null | undefined) {
 
 function filtrarProcessos(processos: ProcessoTempoResumo[], filtro: FiltroResumo) {
   switch (filtro) {
-    case 'sentenca':
-      return processos.filter(processo => processo.temSentenca)
+    case 'recurso':
+      return processos.filter(processo => processo.fase === 'Fase de Recurso')
     case 'liquidacao':
       return processos.filter(processo => processo.fase === 'Liquidação / Execução')
     case 'conhecimento':
@@ -87,9 +87,9 @@ const FILTER_META: Record<FiltroResumo, { titulo: string; descricao: string }> =
     titulo: 'Todos os processos monitorados',
     descricao: 'Lista completa dos processos considerados nas métricas atuais.',
   },
-  sentenca: {
-    titulo: 'Processos com sentença',
-    descricao: 'Processos que já tiveram sentença ou acórdão identificado nas movimentações.',
+  recurso: {
+    titulo: 'Processos em fase de recurso',
+    descricao: 'Processos com sentença que estão em apelação, agravo ou outras fases recursais.',
   },
   liquidacao: {
     titulo: 'Processos em liquidação',
@@ -188,7 +188,7 @@ const DashboardTempos: React.FC = () => {
 
   const summaryCards = dados ? [
     { key: 'todos' as const, label: 'Processos', value: String(dados.resumo.totalProcessos), color: 'text-gray-800', active: filtroResumo === 'todos' },
-    { key: 'sentenca' as const, label: 'Com Sentença', value: String(dados.resumo.processosComSentenca), color: 'text-blue-600', active: filtroResumo === 'sentenca' },
+    { key: 'recurso' as const, label: 'Fase de Recurso', value: String(dados.resumo.processosEmRecurso || 0), color: 'text-amber-600', active: filtroResumo === 'recurso' },
     { key: 'liquidacao' as const, label: 'Em Liquidação', value: String(dados.resumo.processosEmLiquidacao), color: 'text-green-600', active: filtroResumo === 'liquidacao' },
     { key: 'conhecimento' as const, label: 'Em Conhecimento', value: String(dados.resumo.processosEmConhecimento), color: 'text-sky-600', active: filtroResumo === 'conhecimento' },
     { key: 'rpv' as const, label: 'Aguardando RPV', value: String(dados.resumo.processosAguardandoRpv), color: 'text-rose-600', active: filtroResumo === 'rpv' },
@@ -384,7 +384,7 @@ const DashboardTempos: React.FC = () => {
                             if (f.fase === 'Conhecimento') setFiltroResumo('conhecimento')
                             else if (f.fase === 'Aguardando RPV') setFiltroResumo('rpv')
                             else if (f.fase === 'Liquidação / Execução') setFiltroResumo('liquidacao')
-                            else if (f.fase === 'Sentenciado') setFiltroResumo('sentenca')
+                            else if (f.fase === 'Fase de Recurso') setFiltroResumo('recurso')
                             else if (f.fase === 'Arquivado') setFiltroResumo('arquivado')
                           }}
                           className="block w-full text-left"

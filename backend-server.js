@@ -1896,13 +1896,14 @@ app.get('/api/escritorio/metricas-tempo', generalLimiter, async (req, res) => {
     // 3. Padrões de detecção de fases
     const SENTENCA = ['sentença', 'julgado', 'procedente', 'improcedente', 'dispositivo', 'resolv']
     const LIQUIDACAO = ['liquidação', 'cumprimento de sentença', 'execução de título', 'cálculo de liquidação', 'rpv', 'precatório', 'requisição de pagamento']
+    const RECURSO = ['recurso', 'apelação', 'agravo', 'embargos', 'exceção', 'interloc']
 
     // 4. Calcular métricas
     const byTribunal = {}
     const byTipo = {}
     const byFase = {}
     const byAssunto = {}
-    let totalComMovimentos = 0, totalEmLiquidacao = 0, totalEmConhecimento = 0, totalAguardandoRpv = 0, totalArquivado = 0, totalSentenciado = 0
+    let totalComMovimentos = 0, totalEmLiquidacao = 0, totalEmConhecimento = 0, totalAguardandoRpv = 0, totalArquivado = 0, totalRecurso = 0
     const temposTotais = []
 
     for (const p of processosEnriquecidos || []) {
@@ -1929,6 +1930,7 @@ app.get('/api/escritorio/metricas-tempo', generalLimiter, async (req, res) => {
         ? movs.filter(m => new Date(m.data) >= new Date(movSentenca.data))
         : []
       const movLiquidacao = movsAposSentenca.length ? findMov(movsAposSentenca, LIQUIDACAO) : null
+      const movRecurso = movsAposSentenca.length ? findMov(movsAposSentenca, RECURSO) : null
       const ultimaMov = movs[movs.length - 1]
 
       // Detectar padrões de fase
@@ -1946,9 +1948,9 @@ app.get('/api/escritorio/metricas-tempo', generalLimiter, async (req, res) => {
       } else if (movLiquidacao && movSentenca) {
         fase = 'Liquidação / Execução'
         totalEmLiquidacao++
-      } else if (movSentenca) {
-        fase = 'Sentenciado'
-        totalSentenciado++
+      } else if (movRecurso && movSentenca) {
+        fase = 'Fase de Recurso'
+        totalRecurso++
       } else {
         fase = 'Conhecimento'
         totalEmConhecimento++
@@ -2014,11 +2016,12 @@ app.get('/api/escritorio/metricas-tempo', generalLimiter, async (req, res) => {
       resumo: {
         totalProcessos: cnjs.length,
         processosComMovimentos: totalComMovimentos,
-        processosComSentenca: totalSentenciado + totalEmLiquidacao,
+        processosComSentenca: totalRecurso + totalEmLiquidacao,
         processosEmLiquidacao: totalEmLiquidacao,
         processosEmConhecimento: totalEmConhecimento,
         processosAguardandoRpv: totalAguardandoRpv,
         processosArquivados: totalArquivado,
+        processosEmRecurso: totalRecurso,
         mediaGeralDias: media(temposTotais),
       },
     })

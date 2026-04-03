@@ -96,6 +96,7 @@ export interface ResumoMetrica {
   processosEmConhecimento: number
   processosAguardandoRpv: number
   processosArquivados?: number
+  processosEmRecurso?: number
   mediaGeralDias: number | null
 }
 
