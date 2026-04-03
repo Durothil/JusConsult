@@ -1841,9 +1841,14 @@ app.get('/api/escritorio/metricas-tempo', generalLimiter, async (req, res) => {
     }
 
     // Montar lista base com dados do Supabase
+    let processosNaoEncontradosNoSupabase = 0
     const base = cnjs.map(cnj => {
       const p = (processos || []).find(x => x.cnj === cnj)
       const movements = p ? (movimentacoesMap[p.id] || []) : []
+      // Se processo monitorado não está em 'processes', conta como "EM CONHECIMENTO" (sem dados cacheados)
+      if (!p) {
+        processosNaoEncontradosNoSupabase++
+      }
       return {
         cnj,
         tribunal: p?.tribunal || null,
@@ -1970,11 +1975,10 @@ app.get('/api/escritorio/metricas-tempo', generalLimiter, async (req, res) => {
 
     }
 
-    // Contar processos SEM movimentos como "EM CONHECIMENTO"
-    const processosSemMovimentos = base.filter(p => p.process_movements.length === 0)
-    totalEmConhecimento += processosSemMovimentos.length
+    // Contar processos não encontrados no Supabase como "EM CONHECIMENTO"
+    totalEmConhecimento += processosNaoEncontradosNoSupabase
     if (!byFase['Conhecimento']) byFase['Conhecimento'] = { total: 0, temposTotais: [] }
-    byFase['Conhecimento'].total += processosSemMovimentos.length
+    byFase['Conhecimento'].total += processosNaoEncontradosNoSupabase
 
     const porTribunal = Object.entries(byTribunal).map(([tribunal, d]) => ({
       tribunal,
