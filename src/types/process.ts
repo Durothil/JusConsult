@@ -60,6 +60,12 @@ export interface ProcessMovement {
   updatedAt?: string
 }
 
+export interface ProcessMovementsContext {
+  movimentos: ProcessMovement[]
+  aviso?: string
+  podeRefresh?: boolean
+}
+
 export interface ProcessOverview {
   process: Process
   parties: Party[]

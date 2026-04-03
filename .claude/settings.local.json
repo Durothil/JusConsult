@@ -202,7 +202,8 @@
       "mcp__311c0195-1be1-4520-993f-78885cc916f0__validate_workflow",
       "mcp__311c0195-1be1-4520-993f-78885cc916f0__create_workflow_from_code",
       "Bash(find C:UsersrafaeDocumentsToolsTecJustica -type f -name *asaas* -o -name *financeiro*)",
-      "mcp__a51dcb6c-0637-43c1-ade7-0dd311524b02__get_advisors"
+      "mcp__a51dcb6c-0637-43c1-ade7-0dd311524b02__get_advisors",
+      "Bash(git reset:*)"
     ]
   },
   "disabledMcpjsonServers": [

@@ -22,6 +22,7 @@ import { useGargaloProcessual } from '@/hooks/useGargaloProcessual'
 import { useToast } from '@/hooks/useToast'
 import { listarDiligenciasPorCNJ, salvarDiligencia } from '@/services/diligencia.service'
 import { verificarCadastro, monitorarProcesso } from '@/services/escritorio.service'
+import { getMovementAviso, refreshProcessMovements } from '@/services/process.service'
 import {
   approveAndSendClientMessage,
   createDocumentDraft,
@@ -78,6 +79,8 @@ const ProcessDetail: React.FC = () => {
   const [monitorando, setMonitorando] = useState(false)
   const [diligencias, setDiligencias] = useState<DiligenciaOperacional[]>([])
   const [retornoModal, setRetornoModal] = useState<DiligenciaOperacional | null>(null)
+  const [movementAviso, setMovementAviso] = useState<{ aviso: string; podeRefresh: boolean } | null>(null)
+  const [isRefreshingMovements, setIsRefreshingMovements] = useState(false)
   const { toasts, showToast } = useToast()
 
   useEffect(() => {
@@ -93,6 +96,13 @@ const ProcessDetail: React.FC = () => {
   const partiesQuery = useProcessParties(cnj)
   const movementsQuery = useProcessMovements(cnj)
   const documentsQuery = useProcessDocuments(cnj)
+
+  // Verifica se há aviso de devolução quando os movimentos carregam
+  useEffect(() => {
+    if (!cnj || !movementsQuery.data) return
+    const aviso = getMovementAviso(cnj)
+    setMovementAviso(aviso)
+  }, [cnj, movementsQuery.data])
 
   const pendingMessagesQuery = useQuery({
     queryKey: ['client-message-approvals', cnj],
@@ -117,6 +127,24 @@ const ProcessDetail: React.FC = () => {
       queryClient.invalidateQueries({ queryKey: ['client-message-timeline', cnj] }),
     ])
   }, [cnj, queryClient])
+
+  const handleRefreshMovements = useCallback(async () => {
+    if (!cnj) return
+    setIsRefreshingMovements(true)
+    try {
+      await refreshProcessMovements(cnj)
+      // Invalida o cache de movimentos para forçar recarga
+      await queryClient.invalidateQueries({ queryKey: ['process-movements', cnj] })
+      // Verifica se o aviso foi removido
+      const novoAviso = getMovementAviso(cnj)
+      setMovementAviso(novoAviso)
+      showToast('Movimentos atualizados com sucesso!')
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Erro ao atualizar movimentos')
+    } finally {
+      setIsRefreshingMovements(false)
+    }
+  }, [cnj, queryClient, showToast])
 
   const createMovementDraftMutation = useMutation({
     mutationFn: createMovementDraft,
@@ -470,6 +498,30 @@ const ProcessDetail: React.FC = () => {
               <Empty title="Nenhuma movimentacao encontrada" />
             ) : (
               <div className="space-y-4">
+                {movementAviso && (
+                  <div className="rounded-lg border-l-4 border-amber-500 bg-amber-50 p-4">
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="flex-1">
+                        <p className="font-semibold text-amber-900">⚠️ {movementAviso.aviso}</p>
+                        {movementAviso.podeRefresh && (
+                          <p className="mt-2 text-sm text-amber-800">
+                            Clique no botão abaixo para carregar os movimentos mais recentes.
+                          </p>
+                        )}
+                      </div>
+                      {movementAviso.podeRefresh && (
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={handleRefreshMovements}
+                          disabled={isRefreshingMovements || movementsQuery.isLoading}
+                        >
+                          {isRefreshingMovements ? 'Atualizando...' : 'Atualizar movimentos'}
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                )}
                 {movements.map((movement, idx) => (
                   <div key={movement.id || `movement-${idx}`} className="flex gap-4">
                     <div className="flex flex-col items-center">

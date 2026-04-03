@@ -7,6 +7,8 @@ export interface Precedent {
   titulo: string
   ementa: string
   tese?: string
+  decisao?: string
+  teor?: string
   tribunal: string
   orgao?: string
   tipo: 'SUM' | 'SV' | 'RG' | 'IRDR' | 'IRR' | 'RR' | 'CT' | 'OJ' | string

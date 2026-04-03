@@ -93,6 +93,19 @@ export async function getMovementsMCP(cnj: string, limit = 20, offset = 0) {
 }
 
 /**
+ * Lista movimentos com força de refresh (forceRefresh=true)
+ * Usado quando processo foi devolvido à primeira instância
+ */
+export async function getMovementsMCPWithRefresh(cnj: string, limit = 20, offset = 0) {
+  return callBackendAPI('/api/process/movimentos', {
+    numero_processo: cnj,
+    limit,
+    offset,
+    forceRefresh: true,
+  })
+}
+
+/**
  * Lista documentos de um processo
  */
 export async function getDocumentsMCP(cnj: string, limit = 20, offset = 0) {

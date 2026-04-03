@@ -164,10 +164,24 @@ const PrecedentsPage: React.FC = () => {
                           </div>
                         </div>
                       </div>
-                      <div className="pt-4 border-t border-gray-200">
-                        <p className="text-xs uppercase tracking-widest text-gray-500 font-semibold mb-2">Tese</p>
-                        <p className="text-gray-700 leading-relaxed text-sm">{precedent.tese}</p>
-                      </div>
+                      {precedent.tese && (
+                        <div className="pt-4 border-t border-gray-200">
+                          <p className="text-xs uppercase tracking-widest text-gray-500 font-semibold mb-2">Tese</p>
+                          <p className="text-gray-700 leading-relaxed text-sm">{precedent.tese}</p>
+                        </div>
+                      )}
+                      {precedent.decisao && (
+                        <div className="pt-4 border-t border-gray-200">
+                          <p className="text-xs uppercase tracking-widest text-gray-500 font-semibold mb-2">Decisao</p>
+                          <p className="text-gray-700 leading-relaxed text-sm">{precedent.decisao}</p>
+                        </div>
+                      )}
+                      {precedent.teor && (
+                        <div className="pt-4 border-t border-gray-200">
+                          <p className="text-xs uppercase tracking-widest text-gray-500 font-semibold mb-2">Teor Completo</p>
+                          <pre className="text-gray-700 leading-relaxed text-sm whitespace-pre-wrap font-sans">{precedent.teor}</pre>
+                        </div>
+                      )}
                       <div className="grid grid-cols-2 md:grid-cols-3 gap-3 pt-2">
                         <div className="p-3 bg-gray-50 rounded border border-gray-200"><p className="text-xs text-gray-500 uppercase tracking-wide font-semibold mb-1">Tribunal</p><p className="text-sm font-medium text-gray-900">{precedent.orgao}</p></div>
                         <div className="p-3 bg-gray-50 rounded border border-gray-200"><p className="text-xs text-gray-500 uppercase tracking-wide font-semibold mb-1">Tipo</p><p className="text-sm font-medium text-gray-900">{getTypeLabel(precedent.tipo)}</p></div>

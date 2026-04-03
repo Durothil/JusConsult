@@ -148,6 +148,7 @@ export async function getProcessParties(cnj: string): Promise<Party[]> {
 
 /**
  * Obtém movimentos de um processo
+ * Se houver devolução para primeira instância, armazena aviso em sessionStorage
  */
 export async function getProcessMovements(cnj: string): Promise<ProcessMovement[]> {
   const cacheKey = getCacheKey('process_movements', cnj)
@@ -166,8 +167,23 @@ export async function getProcessMovements(cnj: string): Promise<ProcessMovement[
       return []
     }
 
+    // Detecta se há aviso de devolução (resposta com estrutura { movimentos, aviso, podeRefresh })
+    const temAviso = mcpData.aviso && typeof mcpData.aviso === 'string'
+    const movementsList = Array.isArray(mcpData) ? mcpData : (mcpData.movimentos || mcpData.movements || [])
+
+    // Se há aviso, armazena em sessionStorage para o frontend exibir
+    if (temAviso) {
+      const avisoKey = `movimento_aviso_${cnj}`
+      sessionStorage.setItem(avisoKey, JSON.stringify({
+        aviso: mcpData.aviso,
+        podeRefresh: mcpData.podeRefresh || false,
+        timestamp: Date.now()
+      }))
+      console.log(`[movimentos] Detectado aviso para ${cnj}: ${mcpData.aviso}`)
+    }
+
     // Converte resposta MCP para formato ProcessMovement
-    const data: ProcessMovement[] = (Array.isArray(mcpData) ? mcpData : mcpData.movements || []).map((m: MovementMCP) => ({
+    const data: ProcessMovement[] = movementsList.map((m: MovementMCP) => ({
       id: m.id || `${m.data || m.timestamp}-${m.tipo || m.type || ''}-${(m.descricao || m.description || '').slice(0, 10)}`.replace(/\s/g, '-'),
       data: new Date(m.data || m.timestamp || Date.now()),
       tipo: m.tipo || m.type || '',
@@ -180,6 +196,69 @@ export async function getProcessMovements(cnj: string): Promise<ProcessMovement[
     return data
   } catch (error) {
     console.error(`Erro ao buscar movimentos do processo ${cnj}:`, error)
+    return []
+  }
+}
+
+/**
+ * Obtém aviso armazenado de devolução à primeira instância
+ */
+export function getMovementAviso(cnj: string) {
+  const avisoKey = `movimento_aviso_${cnj}`
+  const stored = sessionStorage.getItem(avisoKey)
+  if (!stored) return null
+
+  try {
+    return JSON.parse(stored)
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Solicita atualização de movimentos com forceRefresh=true
+ */
+export async function refreshProcessMovements(cnj: string): Promise<ProcessMovement[]> {
+  try {
+    const mcpData = await mcpService.getMovementsMCPWithRefresh(cnj)
+
+    if (!mcpData) {
+      return []
+    }
+
+    // Detecta se há aviso
+    const temAviso = mcpData.aviso && typeof mcpData.aviso === 'string'
+    const movementsList = Array.isArray(mcpData) ? mcpData : (mcpData.movimentos || mcpData.movements || [])
+
+    if (temAviso) {
+      const avisoKey = `movimento_aviso_${cnj}`
+      sessionStorage.setItem(avisoKey, JSON.stringify({
+        aviso: mcpData.aviso,
+        podeRefresh: mcpData.podeRefresh || false,
+        timestamp: Date.now()
+      }))
+    } else {
+      // Se não há mais aviso, remove do sessionStorage
+      sessionStorage.removeItem(`movimento_aviso_${cnj}`)
+    }
+
+    // Converte resposta MCP para formato ProcessMovement
+    const data: ProcessMovement[] = movementsList.map((m: MovementMCP) => ({
+      id: m.id || `${m.data || m.timestamp}-${m.tipo || m.type || ''}-${(m.descricao || m.description || '').slice(0, 10)}`.replace(/\s/g, '-'),
+      data: new Date(m.data || m.timestamp || Date.now()),
+      tipo: m.tipo || m.type || '',
+      descricao: m.descricao || m.description || '',
+      orgao: m.orgao || m.org || '',
+    }))
+
+    // Atualiza cache
+    const cacheKey = getCacheKey('process_movements', cnj)
+    const ttl = getTTLForType('process_movements')
+    setCache(cacheKey, data, ttl)
+
+    return data
+  } catch (error) {
+    console.error(`Erro ao fazer refresh de movimentos do processo ${cnj}:`, error)
     return []
   }
 }
