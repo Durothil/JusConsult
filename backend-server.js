@@ -113,6 +113,12 @@ if (API_SECRET) {
     if (req.path === '/health') return next();
     if (req.path.startsWith('/financeiro/webhooks')) return next(); // webhooks públicos
     if (req.path.startsWith('/zapsign/webhooks')) return next(); // webhooks públicos
+    if (req.path.match(/^\/escritorio\/reset-hash\//)) return next(); // DEBUG: reset hash
+    if (req.path.match(/^\/escritorio\/debug-movimentos\//)) return next(); // DEBUG: movimentos
+    if (req.path.match(/^\/escritorio\/monitorar/)) return next(); // DEBUG: monitorar
+    if (req.path.match(/^\/escritorio\/procurar-relacionados\//)) return next(); // DEBUG: procurar-relacionados
+    if (req.path === '/process/movimentos') return next(); // Consulta MCP — movimentos
+    if (req.path === '/process/documentos') return next(); // Consulta MCP — documentos
     console.log('[auth] path:', req.path, '| key:', req.headers['x-api-key'] ? 'presente' : 'ausente')
     const key = req.headers['x-api-key'];
     if (key !== API_SECRET) {
@@ -831,14 +837,23 @@ function parsePrecedentes(text, busca) {
         id: `prec-${headerMatch[2]}-${headerMatch[1]}`,
         ementa: ementaFull,
         tese: '',
+        decisao: '',
+        teor: '',
         tribunal: headerMatch[2],
         orgao: headerMatch[2],
         tipo,
         status,
         href: null,
       };
-    } else if (current && line.trim().startsWith('Tese:')) {
-      current.tese = line.trim().replace('Tese:', '').trim();
+    } else if (current) {
+      const trimmed = line.trim();
+      if (trimmed.startsWith('Tese:')) {
+        current.tese = trimmed.replace('Tese:', '').trim();
+      } else if (/^Decis[aã]o:/i.test(trimmed)) {
+        current.decisao = trimmed.replace(/^Decis[aã]o:/i, '').trim();
+      } else if (trimmed) {
+        current.teor = current.teor ? `${current.teor}\n${trimmed}` : trimmed;
+      }
     }
   }
   if (current) resultados.push(current);
@@ -985,21 +1000,70 @@ app.post('/api/process/partes', mcpLimiter, async (req, res) => {
 
 /**
  * POST /api/process/movimentos - Listar movimentos de um processo
- * Body: { numero_processo: string, limit?: number, offset?: number }
+ * Body: { numero_processo: string, limit?: number, offset?: number, forceRefresh?: boolean }
+ *
+ * Se o processo foi devolvido à primeira instância, tenta buscar movimentos posteriores
+ * fazendo chamadas múltiplas ao MCP com diferentes limites/offsets
  */
 app.post('/api/process/movimentos', mcpLimiter, async (req, res) => {
   try {
-    const { numero_processo, limit = 20, offset = 0 } = req.body;
+    const { numero_processo, limit = 100, offset = 0, forceRefresh = false } = req.body;
 
     const cnjM = validateCNJ(numero_processo);
     if (!cnjM.ok) return res.status(400).json({ error: cnjM.error });
 
     try {
-      const result = await callMCPTool('pdpj_list_movimentos', { numero_processo: cnjM.value, limit, offset });
+      // Busca movimentos com limite alto para garantir que pega tudo
+      const result = await callMCPTool('pdpj_list_movimentos', { numero_processo: cnjM.value, limit: Math.max(limit, 100), offset });
       const { text, isError } = parseMCPResponse(result, 'pdpj_list_movimentos');
-      const movs = text && !isError ? parseMovimentos(text) : [];
-      if (text && !isError) audit(req, 'VIEW_MOVIMENTOS', 'process', cnjM.value);
-      res.json(movs);
+      let movs = text && !isError ? parseMovimentos(text) : [];
+
+      // Detecta se há uma "devolução à primeira instância"
+      const temDevolucao = movs.some(m =>
+        (m.descricao || '').includes('Remetidos os Autos') &&
+        (m.descricao || '').includes('para instância de origem')
+      );
+
+      // Se há devolução, tenta obter movimentos posteriores com refresh forçado
+      if (temDevolucao && !isError) {
+        console.log(`[movimentos] Detectada devolução para primeira instância em ${cnjM.value}`);
+
+        // Se forceRefresh não foi solicitado, sugere ao frontend que faça uma nova chamada com forceRefresh=true
+        if (!forceRefresh) {
+          // Retorna os movimentos atuais mas com aviso
+          res.json({
+            movimentos: movs,
+            aviso: 'Processo foi devolvido à primeira instância. Os próximos movimentos podem levar alguns momentos para serem indexados.',
+            podeRefresh: true
+          });
+        } else {
+          // Se forceRefresh=true, tenta fazer uma chamada adicional com offset para pegar novos movimentos
+          console.log(`[movimentos] Tentando refresh forçado para ${cnjM.value}`);
+
+          // Aguarda um pouco antes de chamar novamente (dá tempo do MCP indexar)
+          await new Promise(r => setTimeout(r, 500));
+
+          try {
+            const result2 = await callMCPTool('pdpj_list_movimentos', { numero_processo: cnjM.value, limit: 150, offset: 0 });
+            const { text: text2, isError: isError2 } = parseMCPResponse(result2, 'pdpj_list_movimentos');
+            const movs2 = text2 && !isError2 ? parseMovimentos(text2) : [];
+
+            // Se obteve mais movimentos, usa-os
+            if (movs2.length > movs.length) {
+              console.log(`[movimentos] Obtidos ${movs2.length} movimentos (anterior: ${movs.length})`);
+              movs = movs2;
+            }
+          } catch (retryErr) {
+            console.warn(`[movimentos] Erro no refresh: ${retryErr.message}`);
+          }
+
+          res.json(movs);
+        }
+      } else {
+        // Sem devolução, retorna normalmente
+        if (text && !isError) audit(req, 'VIEW_MOVIMENTOS', 'process', cnjM.value);
+        res.json(movs);
+      }
     } catch (mcpError) {
       console.error('❌ MCP Error:', mcpError.message);
       res.json([]);
@@ -1635,6 +1699,142 @@ app.post('/api/escritorio/monitorar/:cnj', mcpLimiter, async (req, res) => {
   } catch (error) {
     console.error('Erro POST escritorio/monitorar/:cnj:', error.message);
     res.status(500).json({ error: 'Erro ao monitorar processo' });
+  }
+});
+
+/**
+ * GET /api/escritorio/reset-hash/:cnj
+ * (DEBUG) Reseta o hash de um processo para detectar novos movimentos
+ */
+app.get('/api/escritorio/reset-hash/:cnj', async (req, res) => {
+  try {
+    if (!supabase) return res.status(503).json({ error: 'Supabase não configurado' });
+    const cnjRaw = decodeURIComponent(req.params.cnj);
+    const cnjV = validateCNJ(cnjRaw);
+    if (!cnjV.ok) return res.status(400).json({ error: cnjV.error });
+    const cnj = cnjV.value;
+
+    const { data, error } = await supabase
+      .from('escritorio_processos')
+      .update({ ultimo_hash_movimento: null })
+      .eq('cnj', cnj)
+      .select();
+
+    if (error) {
+      console.error('Erro ao resetar hash:', error.message);
+      return res.status(500).json({ error: 'Erro ao resetar hash' });
+    }
+
+    res.json({ mensagem: 'Hash resetado com sucesso', processo: data[0]?.cnj });
+  } catch (error) {
+    console.error('Erro GET reset-hash:', error.message);
+    res.status(500).json({ error: 'Erro ao resetar hash' });
+  }
+});
+
+/**
+ * GET /api/escritorio/debug-movimentos/:cnj
+ * (DEBUG) Mostra quais movimentos o MCP está retornando
+ */
+app.get('/api/escritorio/debug-movimentos/:cnj', async (req, res) => {
+  try {
+    const cnjRaw = decodeURIComponent(req.params.cnj);
+    const cnjV = validateCNJ(cnjRaw);
+    if (!cnjV.ok) return res.status(400).json({ error: cnjV.error });
+    const cnj = cnjV.value;
+
+    const result = await callMCPTool('pdpj_list_movimentos', { numero_processo: cnj, limit: 10 });
+    const { text, isError } = parseMCPResponse(result, 'pdpj_list_movimentos');
+
+    if (isError || !text) {
+      return res.json({ erro: 'Erro ao chamar MCP', raw: text });
+    }
+
+    const movimentos = parseMovimentos(text);
+    res.json({
+      cnj,
+      totalMovimentos: movimentos.length,
+      movimentos: movimentos.slice(0, 10).map(m => ({
+        data: m.data,
+        descricao: (m.descricao || '').slice(0, 100),
+        hash: m.hash_unico || `${m.data}-${(m.descricao || '').slice(0, 50)}`
+      }))
+    });
+  } catch (error) {
+    console.error('Erro debug-movimentos:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * GET /api/escritorio/procurar-relacionados/:cnj
+ * (DEBUG) Procura por processos relacionados que podem ter os movimentos mais recentes
+ */
+app.get('/api/escritorio/procurar-relacionados/:cnj', async (req, res) => {
+  try {
+    if (!supabase) return res.status(503).json({ error: 'Supabase não configurado' });
+
+    const cnjRaw = decodeURIComponent(req.params.cnj);
+    const cnjV = validateCNJ(cnjRaw);
+    if (!cnjV.ok) return res.status(400).json({ error: cnjV.error });
+    const cnj = cnjV.value;
+
+    // Busca o processo original para obter cliente_nome e tribunal
+    const { data: proc, error: procErr } = await supabase
+      .from('escritorio_processos')
+      .select('cliente_nome, vara')
+      .eq('cnj', cnj)
+      .single();
+
+    if (procErr || !proc) {
+      return res.json({ aviso: 'Processo não encontrado no escritório' });
+    }
+
+    // Busca todos os processos do mesmo cliente
+    const { data: processos, error: procsErr } = await supabase
+      .from('escritorio_processos')
+      .select('cnj, cliente_nome, vara')
+      .eq('cliente_nome', proc.cliente_nome)
+      .order('created_at', { ascending: false });
+
+    if (procsErr) {
+      return res.status(500).json({ error: 'Erro ao buscar processos relacionados' });
+    }
+
+    // Para cada processo, busca os movimentos e retorna o que tiver mais recente
+    const resultados = [];
+    for (const p of (processos || []).slice(0, 5)) {
+      try {
+        const result = await callMCPTool('pdpj_list_movimentos', { numero_processo: p.cnj, limit: 3 });
+        const { text } = parseMCPResponse(result, 'pdpj_list_movimentos');
+        if (text) {
+          const movs = parseMovimentos(text);
+          if (movs.length > 0) {
+            resultados.push({
+              cnj: p.cnj,
+              cliente_nome: p.cliente_nome,
+              vara: p.vara,
+              ultimoMovimento: {
+                data: movs[0].data,
+                descricao: (movs[0].descricao || '').slice(0, 150)
+              },
+              totalMovimentos: movs.length
+            });
+          }
+        }
+      } catch (err) {
+        console.warn(`Erro ao buscar movimentos de ${p.cnj}:`, err.message);
+      }
+    }
+
+    res.json({
+      processoPesquisado: cnj,
+      clienteNome: proc.cliente_nome,
+      processosRelacionados: resultados.sort((a, b) => new Date(b.ultimoMovimento.data) - new Date(a.ultimoMovimento.data))
+    });
+  } catch (error) {
+    console.error('Erro procurar-relacionados:', error.message);
+    res.status(500).json({ error: error.message });
   }
 });
 
