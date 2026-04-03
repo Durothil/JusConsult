@@ -26,10 +26,11 @@ const FASE_COLOR: Record<string, string> = {
   Sentenciado: '#f59e0b',
   'Liquidação / Execução': '#10b981',
   'Aguardando RPV': '#e11d48',
+  Arquivado: '#6b7280',
 }
 
 type Periodo = '6m' | '1a' | 'tudo'
-type FiltroResumo = 'todos' | 'sentenca' | 'liquidacao' | 'conhecimento' | 'rpv'
+type FiltroResumo = 'todos' | 'sentenca' | 'liquidacao' | 'conhecimento' | 'rpv' | 'arquivado'
 
 const PERIODO_LABEL: Record<Periodo, string> = {
   '6m': 'Últimos 6 meses',
@@ -74,6 +75,8 @@ function filtrarProcessos(processos: ProcessoTempoResumo[], filtro: FiltroResumo
       return processos.filter(processo => processo.fase === 'Conhecimento')
     case 'rpv':
       return processos.filter(processo => processo.aguardandoRpv)
+    case 'arquivado':
+      return processos.filter(processo => processo.fase === 'Arquivado')
     default:
       return processos
   }
@@ -99,6 +102,10 @@ const FILTER_META: Record<FiltroResumo, { titulo: string; descricao: string }> =
   rpv: {
     titulo: 'Processos aguardando RPV',
     descricao: 'Processos com indício de RPV/requisitório sem baixa posterior de pagamento.',
+  },
+  arquivado: {
+    titulo: 'Processos arquivados',
+    descricao: 'Processos que foram finalizados e arquivados.',
   },
 }
 
@@ -185,6 +192,7 @@ const DashboardTempos: React.FC = () => {
     { key: 'liquidacao' as const, label: 'Em Liquidação', value: String(dados.resumo.processosEmLiquidacao), color: 'text-green-600', active: filtroResumo === 'liquidacao' },
     { key: 'conhecimento' as const, label: 'Em Conhecimento', value: String(dados.resumo.processosEmConhecimento), color: 'text-sky-600', active: filtroResumo === 'conhecimento' },
     { key: 'rpv' as const, label: 'Aguardando RPV', value: String(dados.resumo.processosAguardandoRpv), color: 'text-rose-600', active: filtroResumo === 'rpv' },
+    { key: 'arquivado' as const, label: 'Arquivados', value: String(dados.resumo.processosArquivados || 0), color: 'text-gray-600', active: filtroResumo === 'arquivado' },
   ] : []
 
   const filtroAtual = FILTER_META[filtroResumo]
@@ -377,6 +385,7 @@ const DashboardTempos: React.FC = () => {
                             else if (f.fase === 'Aguardando RPV') setFiltroResumo('rpv')
                             else if (f.fase === 'Liquidação / Execução') setFiltroResumo('liquidacao')
                             else if (f.fase === 'Sentenciado') setFiltroResumo('sentenca')
+                            else if (f.fase === 'Arquivado') setFiltroResumo('arquivado')
                           }}
                           className="block w-full text-left"
                         >

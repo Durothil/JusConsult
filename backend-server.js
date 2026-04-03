@@ -1893,7 +1893,7 @@ app.get('/api/escritorio/metricas-tempo', generalLimiter, async (req, res) => {
     const byTipo = {}
     const byFase = {}
     const byAssunto = {}
-    let totalComMovimentos = 0, totalComSentenca = 0, totalEmLiquidacao = 0
+    let totalComMovimentos = 0, totalComSentenca = 0, totalEmLiquidacao = 0, totalEmConhecimento = 0, totalAguardandoRpv = 0, totalArquivado = 0
     const temposTotais = []
 
     for (const p of processosEnriquecidos || []) {
@@ -1938,7 +1938,24 @@ app.get('/api/escritorio/metricas-tempo', generalLimiter, async (req, res) => {
       byTipo[tipo].temposTotais.push(tempoTotal)
 
       // Fase processual detectada
-      const fase = movLiquidacao ? 'Liquidação / Execução' : movSentenca ? 'Sentenciado' : 'Conhecimento'
+      const temRPV = (ultimaMov.descricao || '').toLowerCase().includes('rpv') || (ultimaMov.descricao || '').toLowerCase().includes('requisição de pagamento')
+      const temArquivado = (ultimaMov.descricao || '').toLowerCase().includes('arquivado') || (ultimaMov.descricao || '').toLowerCase().includes('arquivamento')
+      let fase = 'Conhecimento'
+
+      if (temArquivado) {
+        fase = 'Arquivado'
+        totalArquivado++
+      } else if (temRPV) {
+        fase = 'Aguardando RPV'
+        totalAguardandoRpv++
+      } else if (movLiquidacao) {
+        fase = 'Liquidação / Execução'
+      } else if (movSentenca) {
+        fase = 'Sentenciado'
+      } else {
+        totalEmConhecimento++
+      }
+
       if (!byFase[fase]) byFase[fase] = { total: 0, temposTotais: [] }
       byFase[fase].total++
       byFase[fase].temposTotais.push(tempoTotal)
@@ -1975,11 +1992,15 @@ app.get('/api/escritorio/metricas-tempo', generalLimiter, async (req, res) => {
       porTipoAcao,
       porFase,
       porAssunto,
+      processos: porFase.length > 0 ? [] : [], // Placeholder para dados de processos individuais, se necessário
       resumo: {
         totalProcessos: cnjs.length,
         processosComMovimentos: totalComMovimentos,
         processosComSentenca: totalComSentenca,
         processosEmLiquidacao: totalEmLiquidacao,
+        processosEmConhecimento: totalEmConhecimento,
+        processosAguardandoRpv: totalAguardandoRpv,
+        processosArquivados: totalArquivado,
         mediaGeralDias: media(temposTotais),
       },
     })
