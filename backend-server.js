@@ -1294,10 +1294,27 @@ app.get('/api/escritorio/processos', async (req, res) => {
       return res.status(500).json({ error: 'Erro interno ao processar operação.' });
     }
 
-    // Busca dados dos processos e contagem de alertas não lidos
+    // Busca dados dos processos, movimentos e alertas não lidos
     const cnjs = escritorio.map(e => e.cnj);
+    const processIds = escritorio.map(e => e.id).filter(Boolean);
+
+    // Busca movimentos apenas se houver process IDs
+    let movimentoesRes = { data: [] };
+    if (processIds.length > 0) {
+      const { data, error } = await supabase
+        .from('process_movements')
+        .select('process_id, data, descricao')
+        .in('process_id', processIds);
+      if (error) {
+        console.warn('[escritorio/processos] Falha ao buscar movimentos:', error.message);
+      } else {
+        movimentoesRes = { data: data || [] };
+      }
+    }
+
+    // Busca processos e alertas
     const [processosResult, alertasResult] = await Promise.allSettled([
-      supabase.from('processes').select('cnj,tribunal,classe,assunto,status,data_abertura').in('cnj', cnjs),
+      supabase.from('processes').select('id,cnj,tribunal,classe,assunto,status,data_abertura').in('cnj', cnjs),
       supabase.from('escritorio_alertas').select('cnj').eq('lido', false).in('cnj', cnjs),
     ]);
 
@@ -1309,28 +1326,39 @@ app.get('/api/escritorio/processos', async (req, res) => {
     const processosMap = {};
     (processosRes.data || []).forEach(p => { processosMap[p.cnj] = p; });
 
+    const movimentoesMap = {};
+    (movimentoesRes.data || []).forEach(m => {
+      if (!movimentoesMap[m.process_id]) movimentoesMap[m.process_id] = [];
+      movimentoesMap[m.process_id].push({ data: m.data, descricao: m.descricao });
+    });
+
     const alertasCount = {};
     (alertasRes.data || []).forEach(a => {
       alertasCount[a.cnj] = (alertasCount[a.cnj] || 0) + 1;
     });
 
-    const result = escritorio.map(e => ({
-      id: e.id,
-      cnj: e.cnj,
-      clienteId: e.cliente_id,
-      clienteNome: e.cliente_nome,
-      clientePolo: e.cliente_polo,
-      responsavel: e.responsavel,
-      vara: e.vara,
-      monitorar: e.monitorar,
-      notas: e.notas,
-      ultimaVerificacao: e.ultima_verificacao,
-      ultimoHashMovimento: e.ultimo_hash_movimento,
-      createdAt: e.created_at,
-      updatedAt: e.updated_at,
-      processo: processosMap[e.cnj] || null,
-      alertasNaoLidos: alertasCount[e.cnj] || 0,
-    }));
+    const result = escritorio.map(e => {
+      const movimentos = movimentoesMap[e.id] || [];
+      const { fase } = detectarFase(movimentos);
+      return {
+        id: e.id,
+        cnj: e.cnj,
+        clienteId: e.cliente_id,
+        clienteNome: e.cliente_nome,
+        clientePolo: e.cliente_polo,
+        responsavel: e.responsavel,
+        vara: e.vara,
+        monitorar: e.monitorar,
+        notas: e.notas,
+        ultimaVerificacao: e.ultima_verificacao,
+        ultimoHashMovimento: e.ultimo_hash_movimento,
+        createdAt: e.created_at,
+        updatedAt: e.updated_at,
+        processo: processosMap[e.cnj] || null,
+        alertasNaoLidos: alertasCount[e.cnj] || 0,
+        fase: fase,
+      };
+    });
 
     res.json(result);
   } catch (error) {
@@ -1692,6 +1720,33 @@ function findMov(movs, padroes) {
 }
 function media(arr) { return arr.length ? Math.round(arr.reduce((a, b) => a + b, 0) / arr.length) : null }
 
+// Padrões de detecção de fases (global para uso em múltiplos endpoints)
+const SENTENCA = ['sentença', 'julgado', 'procedente', 'improcedente', 'dispositivo', 'resolv']
+const LIQUIDACAO = ['liquidação', 'cumprimento de sentença', 'execução de título', 'cálculo de liquidação', 'rpv', 'precatório', 'requisição de pagamento']
+const RECURSO = ['recurso', 'apelação', 'agravo', 'embargos', 'exceção', 'interloc']
+
+// Detecta a fase processual baseado nos movimentos
+// Retorna objeto com fase e movimentos detectados para uso em outras métricas
+function detectarFase(movimentacoes) {
+  if (!movimentacoes || movimentacoes.length === 0) return { fase: 'Conhecimento', movSentenca: null, movLiquidacao: null, movRecurso: null, ultimaMov: null }
+  const movs = movimentacoes.sort((a, b) => new Date(a.data) - new Date(b.data))
+  const ultimaMov = movs[movs.length - 1]
+  const movSentenca = findMov(movs, SENTENCA)
+  const movsAposSentenca = movSentenca ? movs.filter(m => new Date(m.data) >= new Date(movSentenca.data)) : []
+  const movLiquidacao = movsAposSentenca.length ? findMov(movsAposSentenca, LIQUIDACAO) : null
+  const movRecurso = movsAposSentenca.length ? findMov(movsAposSentenca, RECURSO) : null
+  const temRPV = (ultimaMov.descricao || '').toLowerCase().includes('rpv') || (ultimaMov.descricao || '').toLowerCase().includes('requisição de pagamento')
+  const temArquivado = (ultimaMov.descricao || '').toLowerCase().includes('arquivado') || (ultimaMov.descricao || '').toLowerCase().includes('arquivamento')
+
+  let fase = 'Conhecimento'
+  if (temArquivado) fase = 'Arquivado'
+  else if (temRPV) fase = 'Aguardando RPV'
+  else if (movLiquidacao && movSentenca) fase = 'Liquidação / Execução'
+  else if (movRecurso && movSentenca) fase = 'Fase de Recurso'
+
+  return { fase, movSentenca, movLiquidacao, movRecurso, ultimaMov }
+}
+
 /**
  * POST /api/escritorio/sincronizar-assuntos
  * Atualiza campo assunto de todos os processos do escritório que estão sem assunto no Supabase
@@ -1893,10 +1948,7 @@ app.get('/api/escritorio/metricas-tempo', generalLimiter, async (req, res) => {
       .map(p => ({ ...p, tribunal: p.tribunal || 'Não informado', classe: p.classe || 'Não informado', assunto: p.assunto || null }))
       .filter(p => p.process_movements.length > 0)
 
-    // 3. Padrões de detecção de fases
-    const SENTENCA = ['sentença', 'julgado', 'procedente', 'improcedente', 'dispositivo', 'resolv']
-    const LIQUIDACAO = ['liquidação', 'cumprimento de sentença', 'execução de título', 'cálculo de liquidação', 'rpv', 'precatório', 'requisição de pagamento']
-    const RECURSO = ['recurso', 'apelação', 'agravo', 'embargos', 'exceção', 'interloc']
+    // 3. Usar detectarFase global (definida após as helpers functions)
 
     // 4. Calcular métricas
     const byTribunal = {}
@@ -1925,36 +1977,14 @@ app.get('/api/escritorio/metricas-tempo', generalLimiter, async (req, res) => {
       if (!byTipo[tipo]) byTipo[tipo] = { temposTotais: [], total: 0 }
       byTipo[tipo].total++
 
-      const movSentenca = findMov(movs, SENTENCA)
-      const movsAposSentenca = movSentenca
-        ? movs.filter(m => new Date(m.data) >= new Date(movSentenca.data))
-        : []
-      const movLiquidacao = movsAposSentenca.length ? findMov(movsAposSentenca, LIQUIDACAO) : null
-      const movRecurso = movsAposSentenca.length ? findMov(movsAposSentenca, RECURSO) : null
-      const ultimaMov = movs[movs.length - 1]
+      const { fase, movSentenca, movLiquidacao, ultimaMov } = detectarFase(movs)
 
-      // Detectar padrões de fase
-      const temRPV = (ultimaMov.descricao || '').toLowerCase().includes('rpv') || (ultimaMov.descricao || '').toLowerCase().includes('requisição de pagamento')
-      const temArquivado = (ultimaMov.descricao || '').toLowerCase().includes('arquivado') || (ultimaMov.descricao || '').toLowerCase().includes('arquivamento')
-
-      // Determinar fase e contar (mutuamente exclusivos)
-      let fase = 'Conhecimento'
-      if (temArquivado) {
-        fase = 'Arquivado'
-        totalArquivado++
-      } else if (temRPV) {
-        fase = 'Aguardando RPV'
-        totalAguardandoRpv++
-      } else if (movLiquidacao && movSentenca) {
-        fase = 'Liquidação / Execução'
-        totalEmLiquidacao++
-      } else if (movRecurso && movSentenca) {
-        fase = 'Fase de Recurso'
-        totalRecurso++
-      } else {
-        fase = 'Conhecimento'
-        totalEmConhecimento++
-      }
+      // Contar por fase
+      if (fase === 'Arquivado') totalArquivado++
+      else if (fase === 'Aguardando RPV') totalAguardandoRpv++
+      else if (fase === 'Liquidação / Execução') totalEmLiquidacao++
+      else if (fase === 'Fase de Recurso') totalRecurso++
+      else totalEmConhecimento++
 
       // Contar para métricas de tempo por tribunal (não é duplicação, é agregação por tribunal)
       if (movSentenca) {

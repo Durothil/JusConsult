@@ -19,6 +19,7 @@ export interface EscritorioProcesso {
   updatedAt: string
   processo?: Process
   alertasNaoLidos?: number
+  fase?: string
 }
 
 export interface EscritorioAlerta {
