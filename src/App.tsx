@@ -1,3 +1,4 @@
+import { lazy, Suspense } from 'react'
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { AuthProvider } from '@/contexts/AuthContext'
@@ -6,20 +7,22 @@ import Layout from '@/components/layout/Layout'
 import Home from '@/pages/Home'
 import ProcessDetail from '@/pages/ProcessDetail'
 import DocumentViewer from '@/pages/DocumentViewer'
-import PrecedentsPage from '@/pages/PrecedentsPage'
-import SearchCPF from '@/pages/SearchCPF'
-import MeusProcessos from '@/pages/MeusProcessos'
-import FilaDiligencias from '@/pages/FilaDiligencias'
-import DashboardOperacional from '@/pages/DashboardOperacional'
-import DashboardTempos from '@/pages/DashboardTempos'
-import ChatIA from '@/pages/ChatIA'
-import Clientes from '@/pages/Clientes'
-import Configuracoes from '@/pages/Configuracoes'
-import Financeiro from '@/pages/Financeiro'
-import Comunicacao from '@/pages/Comunicacao'
-import ClientesFechados from '@/pages/ClientesFechados'
-import NotFound from '@/pages/NotFound'
 import Login from '@/pages/Login'
+import NotFound from '@/pages/NotFound'
+
+// Lazy-loaded pages
+const PrecedentsPage = lazy(() => import('@/pages/PrecedentsPage'))
+const SearchCPF = lazy(() => import('@/pages/SearchCPF'))
+const MeusProcessos = lazy(() => import('@/pages/MeusProcessos'))
+const FilaDiligencias = lazy(() => import('@/pages/FilaDiligencias'))
+const DashboardOperacional = lazy(() => import('@/pages/DashboardOperacional'))
+const DashboardTempos = lazy(() => import('@/pages/DashboardTempos'))
+const ChatIA = lazy(() => import('@/pages/ChatIA'))
+const Clientes = lazy(() => import('@/pages/Clientes'))
+const Configuracoes = lazy(() => import('@/pages/Configuracoes'))
+const Financeiro = lazy(() => import('@/pages/Financeiro'))
+const Comunicacao = lazy(() => import('@/pages/Comunicacao'))
+const ClientesFechados = lazy(() => import('@/pages/ClientesFechados'))
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -30,6 +33,17 @@ const queryClient = new QueryClient({
     },
   },
 })
+
+function PageLoader() {
+  return (
+    <div className="flex items-center justify-center min-h-screen">
+      <div className="flex flex-col items-center gap-4">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+        <p className="text-gray-600">Carregando...</p>
+      </div>
+    </div>
+  )
+}
 
 function App() {
   return (
@@ -43,18 +57,18 @@ function App() {
                 <Route index element={<Home />} />
                 <Route path="/process/:cnj" element={<ProcessDetail />} />
                 <Route path="/document/:documentId" element={<DocumentViewer />} />
-                <Route path="/precedents" element={<PrecedentsPage />} />
-                <Route path="/search-cpf" element={<SearchCPF />} />
-                <Route path="/meus-processos" element={<MeusProcessos />} />
-                <Route path="/diligencias" element={<FilaDiligencias />} />
-                <Route path="/dashboard-operacional" element={<DashboardOperacional />} />
-                <Route path="/dashboard-tempos" element={<DashboardTempos />} />
-                <Route path="/ia" element={<ChatIA />} />
-                <Route path="/clientes" element={<Clientes />} />
-                <Route path="/comunicacao" element={<Comunicacao />} />
-                <Route path="/financeiro" element={<Financeiro />} />
-                <Route path="/clientes-fechados" element={<ClientesFechados />} />
-                <Route path="/configuracoes" element={<Configuracoes />} />
+                <Route path="/precedents" element={<Suspense fallback={<PageLoader />}><PrecedentsPage /></Suspense>} />
+                <Route path="/search-cpf" element={<Suspense fallback={<PageLoader />}><SearchCPF /></Suspense>} />
+                <Route path="/meus-processos" element={<Suspense fallback={<PageLoader />}><MeusProcessos /></Suspense>} />
+                <Route path="/diligencias" element={<Suspense fallback={<PageLoader />}><FilaDiligencias /></Suspense>} />
+                <Route path="/dashboard-operacional" element={<Suspense fallback={<PageLoader />}><DashboardOperacional /></Suspense>} />
+                <Route path="/dashboard-tempos" element={<Suspense fallback={<PageLoader />}><DashboardTempos /></Suspense>} />
+                <Route path="/ia" element={<Suspense fallback={<PageLoader />}><ChatIA /></Suspense>} />
+                <Route path="/clientes" element={<Suspense fallback={<PageLoader />}><Clientes /></Suspense>} />
+                <Route path="/comunicacao" element={<Suspense fallback={<PageLoader />}><Comunicacao /></Suspense>} />
+                <Route path="/financeiro" element={<Suspense fallback={<PageLoader />}><Financeiro /></Suspense>} />
+                <Route path="/clientes-fechados" element={<Suspense fallback={<PageLoader />}><ClientesFechados /></Suspense>} />
+                <Route path="/configuracoes" element={<Suspense fallback={<PageLoader />}><Configuracoes /></Suspense>} />
                 <Route path="*" element={<NotFound />} />
               </Route>
             </Route>
