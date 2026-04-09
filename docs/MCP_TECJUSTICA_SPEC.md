@@ -156,11 +156,18 @@ Ajuizado: 2024-01-15
   "tribunal": "TJSP",
   "classe": "Procedimento Comum Cível",
   "assunto": "Responsabilidade Civil",
+  "assuntos": ["Responsabilidade Civil", "Indenização por Dano Moral"],
   "status": "Em andamento",
   "juiz": "Dr. João da Silva Pereira",
   "vara": "37ª Vara Cível de São Paulo",
+  "orgao_julgador": {
+    "codigo": null,
+    "nome": "37ª Vara Cível de São Paulo",
+    "codigo_municipio_ibge": null
+  },
   "valor": 25000.00,
   "data_abertura": "2024-01-15",
+  "ultima_atualizacao": "2025-03-15T10:22:00Z",
   "resumo": "<texto bruto completo retornado pelo MCP>"
 }
 ```
@@ -170,12 +177,18 @@ Ajuizado: 2024-01-15
 | `numero_processo` | string | não | Fallback para o número de entrada |
 | `tribunal` | string | não | Primeira parte do campo Tribunal |
 | `classe` | string | não | |
-| `assunto` | string | não | |
+| `assunto` | string | não | **Truncado:** primeiro/principal assunto apenas (ver `assuntos[]`) |
+| `assuntos` | string[] | não | Lista completa de assuntos. Na fonte Datajud é `assuntos[].descricao` (array com código TPU + descrição). Implementação atual extrai apenas o primeiro; implementações futuras devem expor o array completo |
 | `status` | string | não | Default `"Em andamento"` se ausente |
 | `juiz` | string | não | |
-| `vara` | string | não | Terceira parte do campo Tribunal (pode ser vazio) |
+| `vara` | string | não | Terceira parte do campo Tribunal — equivale a `orgao_julgador.nome` |
+| `orgao_julgador` | object | não | Estrutura completa do órgão julgador. Na fonte Datajud contém `{codigo, nome, codigoMunicipioIBGE}`. Implementação atual preenche apenas `nome`; `codigo` e `codigo_municipio_ibge` são null quando não fornecidos pelo MCP |
+| `orgao_julgador.codigo` | string\|null | sim | Código interno do órgão no PDPJ |
+| `orgao_julgador.nome` | string | não | Nome legível da vara/serventia |
+| `orgao_julgador.codigo_municipio_ibge` | string\|null | sim | Código IBGE do município — útil para geolocalização e roteamento por comarca |
 | `valor` | number | não | Float; `0` se ausente |
 | `data_abertura` | string\|null | sim | ISO 8601 (`YYYY-MM-DD`) |
+| `ultima_atualizacao` | string\|null | sim | ISO 8601 com hora — corresponde ao `@timestamp` do índice Datajud. **Crítico para cache:** indica quando os dados foram atualizados na fonte; use para decidir se o cache local está obsoleto |
 | `resumo` | string | não | Texto raw completo da resposta MCP |
 
 ---
@@ -337,10 +350,12 @@ O servidor suporta **três formatos de linha**:
 [15] 2024-12-15 14:30 | Sentença
 Juiz prolatou sentença condenando o réu ao pagamento de danos morais.
 Órgão: 37ª Vara Cível
+Código: 11010
 
 [14] 2024-11-10 09:00 | Audiência de Instrução
 Realizada audiência de instrução e julgamento.
 Doc: uuid-do-documento
+Código: 22600
 ```
 
 **Formato B**:
@@ -365,6 +380,7 @@ Texto da movimentação aqui.
     "id": "mov-15",
     "data": "2024-12-15T14:30:00",
     "tipo": "Sentença",
+    "codigo_tpu": 11010,
     "descricao": "Juiz prolatou sentença condenando o réu ao pagamento de danos morais.",
     "orgao": "37ª Vara Cível",
     "doc_id": null
@@ -376,7 +392,8 @@ Texto da movimentação aqui.
 |-------|------|----------|-----------|
 | `id` | string | não | `"mov-N"` onde N é o número da linha |
 | `data` | string | não | ISO 8601 com hora (`T00:00:00` quando sem hora) |
-| `tipo` | string | não | Nome do tipo de movimentação |
+| `tipo` | string | não | Descrição textual da movimentação (ex: `"Sentença"`) |
+| `codigo_tpu` | integer\|null | sim | Código numérico da Tabela Processual Unificada (TPU) do CNJ. Na fonte Datajud: `movimentos[].codigo`. **Preferir filtros por código em vez de string matching em `tipo`**, pois a descrição pode variar entre tribunais enquanto o código é padronizado nacionalmente |
 | `descricao` | string | não | Primeira linha de texto após o header |
 | `orgao` | string | não | Extraído de `Órgão:` ou `Orgao:` |
 | `doc_id` | string\|null | sim | Extraído de `Doc:` |
@@ -686,6 +703,22 @@ NNNNNNN-DD.AAAA.J.TT.OOOO
 
 Exemplo: `7654321-89.2024.8.26.0100`
 
+**Decodificação do dígito `J` (segmento de justiça):**
+
+| J | Ramo |
+|---|------|
+| 1 | STF |
+| 2 | CNJ |
+| 3 | STJ |
+| 4 | Justiça Federal (TRFs) |
+| 5 | Justiça do Trabalho (TRTs) |
+| 6 | Justiça Eleitoral (TREs) |
+| 7 | Justiça Militar da União |
+| 8 | Justiça Estadual (TJs) |
+| 9 | Justiça Militar Estadual |
+
+O dígito `J` determina qual índice do Datajud deve ser consultado para esse processo (ex: `J=8, TT=26` → `api_publica_tjsp`).
+
 ---
 
 ## 5. Notas de Implementação
@@ -725,11 +758,28 @@ Tribunal: TRF5 | 1o Grau | JEF - PERNAMBUCO
 
 Se o campo `Tribunal` tiver menos de 3 partes, `vara` será string vazia.
 
-### 5.7 Limitações conhecidas
+### 5.7 Rate limiting upstream (Datajud)
 
-- Dados do DataLake PDPJ/CNJ podem ter atraso de atualização
+O servidor TecJustica MCP consulta a API Pública do Datajud como fonte primária de dados. Essa API possui rate limiting regulado pelo CNJ para evitar sobrecarga da infraestrutura dos tribunais.
+
+**Implicações para implementações do servidor MCP:**
+- Respeitar os limites de taxa do Datajud independentemente dos limitadores do próprio MCP
+- Implementar throttling e backoff nas chamadas downstream ao Datajud
+- Não disparar consultas em burst para múltiplos processos simultaneamente — sequenciar ou usar filas
+- Para CPF/CNPJ de grandes empresas (milhares de processos), sempre exigir filtro de `tribunal` e/ou `situacao` antes de paginar
+
+**Códigos HTTP esperados do Datajud:**
+- `404` — processo não encontrado naquele índice de tribunal
+- `403` — sem permissão (processo sigiloso ou token inválido)
+- `429` — rate limit atingido (implementar backoff)
+
+### 5.8 Limitações conhecidas
+
+- Dados do DataLake PDPJ/CNJ podem ter atraso de atualização — usar `ultima_atualizacao` (`@timestamp`) para avaliar frescor
 - A estabilidade depende dos servidores dos tribunais
 - `pdpj_read_documentos_batch` aceita no máximo 50 IDs por chamada
+- Campo `assunto` retorna apenas o assunto principal; múltiplos assuntos requerem o campo `assuntos[]`
+- Campos `codigo_tpu`, `orgao_julgador.codigo` e `orgao_julgador.codigo_municipio_ibge` podem ser `null` dependendo do tribunal e do nível de detalhe exposto pelo MCP
 
 ---
 
@@ -761,4 +811,22 @@ Se o campo `Tribunal` tiver menos de 3 partes, `vara` será string vazia.
 
 ---
 
-*Gerado em 2026-04-09 a partir de `backend-server.js` (parsers) e `tecjustica-skill-analise-processual.md`.*
+---
+
+## 7. Ferramentas Potenciais (não implementadas)
+
+### 7.1 Domicílio Judicial Eletrônico
+
+O PDPJ-Br oferece um serviço de citações e intimações eletrônicas com modelo **push via webhook**, diferente do modelo pull das 9 ferramentas atuais. Uma futura tool poderia expor:
+
+| Tool (sugerida) | Descrição |
+|-----------------|-----------|
+| `pdpj_verificar_habilitacao` | Verifica se CPF/CNPJ está habilitado para receber comunicações eletrônicas |
+| `pdpj_listar_intimacoes` | Lista citações e intimações pendentes de uma parte |
+
+**Segurança do webhook:** o PDPJ assina as notificações com HMAC-SHA256 no header `X-PDPJ-Webhook-Signature`. Uma implementação deve validar esse hash antes de processar qualquer notificação recebida.
+
+---
+
+*Gerado em 2026-04-09 a partir de `backend-server.js` (parsers) e `tecjustica-skill-analise-processual.md`.*  
+*Atualizado em 2026-04-09 com informações do relatório Gemini sobre a arquitetura PDPJ-Br.*
